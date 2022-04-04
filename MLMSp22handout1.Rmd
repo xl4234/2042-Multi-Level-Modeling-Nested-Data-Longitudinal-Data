@@ -1,0 +1,428 @@
+---
+title: "MLM Nested Handout 1 (Spring 2022)"
+header-includes:
+   - \usepackage{todonotes}
+   - \usepackage{hyperref}
+output:
+  pdf_document: 
+     extra_dependencies: xcolor
+  html_document: default
+---
+
+\definecolor{hightlightColor}{HTML}{FFFF66}
+
+    ```{r setup, include=FALSE,echo=F}
+knitr::opts_chunk$set(echo=TRUE,tidy=TRUE)
+# make sure dir struct is like: "~/Dropbox/Teaching/MLM Nested_Sp22/Handouts"
+    library(ggplot2)
+    library(lattice)
+    #set "vanillaR" flag for use of ggplot or not (when implemented)
+    vanillaR <- F
+    showR <- T
+    liveDemo <- F
+    ```
+
+# Nested grouping structure
+## Introduction
+1. In certain situations, data are naturally nested in some manner.  The classic example is students within classrooms within schools. *Why can't we simply use regression?*
+    i. The independence of errors assumption is unlikely to hold.  This may bias the s.e. of the regression coefficients, and the significance of your findings relies on the accuracy of the s.e. 
+    ii. We want to 'control' for group effects, somehow.  Failure to do so could result in omitted variable bias.
+    iii. We are actually interested in quantifying the manner in which groups in our sample differ from one another.  
+        a. Differences can be in level or response to predictor. E.g. hospital-specific relationship of mortality to patient SES  
+        b. But...including group indicators and/or group interaction terms is not feasible (*what is one reason that this would be true?*)
+
+2. Example: classroom.csv.  This dataset has three levels of nesting: schools, classrooms within schools and students within those classrooms.
+
+    ```{r read,size='tiny', include=showR, echo=showR}
+dat <- read.csv("../Datasets/classroom.csv")
+summarizeGroup <- function(x) {
+   idCt <- table(x)  #counts of unique ids
+   return(list(UniqGroups=length(idCt),minPerGroup=min(idCt),meanPerGroup=mean(idCt), maxPerGroup=max(idCt)))
+}
+t(sapply(dat[,c("schoolid","classid")],summarizeGroup))  #assuming unique ids across levels of nesting; e.g., id for classroom is unique across schools as well as within.
+    ```
+     i. In this sample, there are 107 schools, a total of 312 classrooms across all schools, and 1190 students total.  Within a school, there are between 2 and 31 students sampled
+         a. Actually, classrooms are sampled first at each school, and within a classroom, between 1 and 10 students are studied.  
+
+    ```{r desc,size='tiny', include=showR, echo=showR}
+     head(dat)
+    ```
+    ii. Collected at the **student level**: some basic demographics (sex (1=female), minority (0/1), ses); outcomes (math score in spring of kindergarten, called mathkind, and the increase in math score from spring of kindergarten to spring of first grade, called mathgain).
+    iii. At the **classroom level**, we have information on the teacher (years teaching, math knowledge, math preparation (# courses))
+    iv.	At the **school level**, we have the average household poverty. 
+3. Say we want to understand the relationship between math scores in kindergarten and ses:
+    i. Regression approach: pool the data; ignore nesting.  What is the overall slope?
+    ii. Graphically:
+    ```{r plot1,size='tiny', include=showR, echo=showR}
+    if (vanillaR) {
+       plot(dat$ses,dat$mathkind)
+       abline(lsfit(dat$ses,dat$mathkind),col=2)
+    } else {
+      ggplot(dat, aes(x = ses, y = mathkind)) + geom_point() + geom_smooth(method = "lm", se = FALSE,col=2)
+    }
+    if (liveDemo) {
+       ggplot(dat, aes(x = ses, y = mathkind,color=schoolid)) + geom_point() + geom_smooth(method = "lm", se = FALSE,col=2) #+theme(legend.position = "none")
+    }
+    ```
+    
+    iii. Numerically:  
+        a. Implicit: weight each student equally; assume independent observations  
+        b. Comparing two students differing by one unit of SES, we expect or predict a 14.4 unit difference in MATHKIND on average.
+    ```{r fit1,size='tiny', include=showR, echo=showR}
+fit1 <- lm(mathkind~ses,data=dat)
+print(summary(fit1))
+    ```
+    iv. We now examine the independence assumption with a simple descriptive exploration, the distribution of mathkind within schools using a stacked boxplot (x-axis is schoolid)
+        a. We see some differences, at least in the median within school (\colorbox{hightlightColor}{qtn: why might schools differ?})
+        a. Why does this indicate non-independence *within* school?  HINT: what would independence look like?
+
+    ```{r box1,size='tiny', include=showR, echo=showR}
+    if (vanillaR) {
+       ord <- order(unlist(tapply(dat$mathkind,dat$schoolid,median)))
+       boxplot(split(dat$mathkind,dat$schoolid)[ord])
+    } else {
+       ggplot(dat, aes(x = reorder(schoolid, mathkind, FUN=median), y = mathkind)) + geom_boxplot()
+    }
+    ```
+     v. Another way to examine dependence is to take a random draw of pairs of subjects within each school (repeating for all schools) and correlate the outcomes.  If these have a significant correlation, then they are dependent.
+        a. When we do this, we get a correlation of about 0.23.
+    ```{r cor1,size='tiny', include=showR, echo=showR}       
+        #draw paired sample from schools for correlation analysis:
+    set.seed(2042001)
+    x<-matrix(unlist(tapply(dat$mathkind,dat$schoolid,sample,size=2)),ncol=2,byrow=T)
+    cor(x)[1,2]
+    if (vanillaR) {
+      plot(x,col=rainbow(dim(x)[1]),pch=16)
+    } else {
+       x.df <- data.frame(id=row(x)[,1],pairElement1=x[,1],pairElement2=x[,2])
+       ggplot(x.df, aes(x=pairElement1,y=pairElement2,col=id)) + geom_point() + scale_color_gradientn(colours = rainbow(length(x.df)))
+    }
+    ```
+        
+4. Some schools have higher outcomes, in general, but does the *relationship* between outcome and predictor vary by school (this is what we mean by a "response surface" for a predictor or set of them)?
+    i. Here is an attempt to visualize some of the potential variation in the relationship of mathkind to ses by separately plotting the first 12 schoolids: 
+    ```{r lat1,size='tiny', include=showR, echo=showR}
+    if (vanillaR) {
+      xyplot(mathkind~ses|schoolid,data=dat[dat$schoolid<13,],type=c('p','r')) #close enough
+    } else {
+      ggplot(data=subset(dat,schoolid<13),aes(y=mathkind,x=ses))+geom_smooth(method = "lm", se = FALSE,col=2)+geom_point()+facet_wrap(~schoolid,nrow = 3)  
+    }
+    ```
+    ii. The fitted lines are 'mini-regressions,' or 'un-pooled' regressions.  What if we look at the coefficients from each of these?  What might be a downside of doing this (is it practical to do this)? Would we get the same slope in each regression?  How might we combine the school-specific slopes?
+        a. One concern: small samples yield imprecise estimates
+        a. Another concern: how to combine (meaningfully)?
+        a. More subtle: do we want to assess the degree to which these slopes differ?  Is this of intrinsic interest to us? (it may be) 
+    iii. Below are the coefficients ($\hat\beta$) from 107 separate regressions (one per school) of mathkind on ses.  We plot these first in ascending order with 95% confidence bounds, then plot the density of the coefficients taken as an ensemble.  
+        a. The median in this ensemble of coefficients is 8.3, their mean is 8.6; a weighted mean is 10.3.  Pooled (ignoring grouping) estimate is 14.4 (red line). *Which one should you report?*  
+        b. We follow the plot with the distribution of the coeffients.
+The range of school-level effects (the effect of SES) is substantial (mainly between -50 and 80). 
+    ```{r coefs1,size='tiny', include=showR, echo=showR}
+set.seed(2042001)
+beta.ses <- 0
+beta.se <- 0
+school.n <- 0
+idList <- unique(dat$schoolid)
+len <- length(idList)
+#slopes for SES by school, one for each.
+for (i in 1:len) {
+    b<-dat$schoolid==idList[i]
+    school.n[i] <- sum(b)
+    fit1<-lm(dat$mathkind[b]~dat$ses[b])
+    beta.ses[i] <- fit1$coef[2]
+    beta.se[i]<-summary(fit1)$coef[2,2]
+}
+#means using different weights:
+
+#unweighted
+wtd.beta1 <- mean(beta.ses)
+print(wtd.beta1)
+#wtd by school size
+wtd.beta2 <- sum(beta.ses*school.n)/sum(school.n)
+print(wtd.beta2)
+#OLS regression-based weights:
+coef1 <- lsfit(dat$ses,dat$mathkind)$coef
+print(coef1)
+#PLOT the point ests of slopes:
+ord <-order(beta.ses,decreasing=F)
+plot(idList,beta.ses[ord],xlab='Schools',ylab='beta.ses',ylim=c(-125,125),axes=F);box();axis(2)
+segments(idList,beta.ses[ord]+1.96*beta.se[ord],idList,beta.ses[ord]-1.96*beta.se[ord])
+abline(h=coef1[2],col=2)
+#density
+if (vanillaR) { 
+  plot(density(beta.ses))
+  abline(v=coef1[2],col=2) #line at regression point.
+} else {
+    ggplot(data=NULL, aes(beta.ses)) +  geom_density() + geom_vline(xintercept = coef1[2],col=2)
+}
+    ```
+5. This example shows us that we might need models that allow for:
+    i. Correlation within groups
+    ii. Group-specific intercepts (level differences)
+    iii. Variation in the response (or "returns") associated with a predictor on the outcome, by group.  We eventually call these random slopes.
+
+## Modeling: first pass    
+1. How can we write down a mathematical (statistical) model that accounts for some of this nested information, for our classroom example?
+    i. The usual regression model, $MATHKIND_i=b_0+b_1SES_i+\varepsilon_i$, in which the index $i$ tracks the student to which we are referring, fails to capture anything about students being nested within schools.  What if we added another subscripted index that tracked this?
+2.	We write an equation: $MATHKIND_{ij}=b_0+b_1SES_{ij}+\varepsilon_{ij}$. Notationally, $MATHKIND_{ij}$  is the outcome for the $i^{th}$ student in the $j^{th}$ school, with corresponding predictor $SES_{ij}$, and error $\varepsilon_{ij}$.
+    i. To uniquely identify a subject, we need both $i$ and $j$; this allows there to be more than one student indexed by $i$ in two different schools. 
+        a. i.e., student identifiers should be thought of as pairs (student, school): (1,1), (2,1),..., (1,2),(2,2),...  *even if the actual IDs used in the dataset are unique across schools.*
+    ii. Why go to this trouble of referring to schools in the subscript index?  Because one way to account for the nested relationships is by introducing an "effect" indexed by group membership, and we need to associate effects with groups (here, schools). 
+        a.  An effect is simply a way to account for a difference.  At one extreme, we could model each school as having its own intercept – this is one type of effect.  It could be implemented using indicator variables – one for each school (omitting a single reference school). This would involve 106 new parameters in our school example.
+        a.  If it is reasonable to assume that differences in level between schools (on average) follow a normal distribution and that *we are not interested in specific levels* for each school, but simply adjusting for those differences, then we can use a *random effect* to represent school (group) differences. With random effects:   
+            + The assumption is that we have a sample from a population. 
+            + We must also assume that these effects and errors are independent.
+    iii. Notationally, we use a Greek letter to represent a random effect and include enough indices to uniquely identify it:  
+$MATHKIND_{ij} = b_0 + b_1SES_{ij} + \zeta_j + \varepsilon_{ij}$.
+School $j$ gets a unique shift up or down, based on the value of $\zeta_j$, its random effect. 
+    iv. There is more to do:  There are two random (stochastic) components to the model and they must be further specified.  We usually assume $\zeta_j \sim N(0,\sigma_\zeta^2)$  [read this as, "zeta sub $j$ is distributed as a normal random variable with mean 0 and variance sigma sub zeta squared] and $\varepsilon_{ij} \sim N(0,\sigma_\varepsilon^2)$, independently of one another.
+3. With all of these components in place, we can fit the above model, $MATHKIND_{ij} = b_0 + b_1SES_{ij} + \zeta_j + \varepsilon_{ij}$, using the method of maximum likelihood (this is what is commonly used in most statistical models you will encounter).  \colorbox{hightlightColor}{What is different about this model (compared to regression)?}
+    i. One concern: what is the role of the $\zeta_j$ term in the estimation?  We do not plan to estimate each of these (107) separately, instead, we only estimate the variance of their distribution, $\sigma_\zeta^2$.
+        a. 	While we do not estimate them individually, they are still part of the model, so one can think of each subject in school $j$ as having a school-specific intercept, $\zeta_j$.  Including the intercepts produces better estimates (in a manner to be made more precise) of the effects for the remaining predictors.
+    ii. While the error terms $\varepsilon_{ij}$ are independent, outcomes are not, and this is our first attempt to capture this in a model.  The way that we can quantify the dependence is by comparing observations within and between groups (here, indexed by $j$).
+        a. We find that under this model, the correlation between two outcomes is known precisely:
+$$
+\mbox{Cor}(MATHKIND_{ij},MATHKIND_{i'j}) = \frac{\sigma_\zeta^2}{\sigma_\zeta^2 + \sigma_\varepsilon^2},\ \mbox{when}\  i\neq i'
+$$
+            + We assume $j$ is the same (group or school) in this comparison.  So observations are correlated in a prescribed manner, within schools.
+        b. $Cor(MATHKIND_{ij},MATHKIND_{i'j'}) = 0,\ \mbox{when}\  j\neq j'$ (different groups, or schools in our example). 
+        c. This is the proportion of variation between groups as a fraction of the total and also known as the Intraclass Correlation Coefficient (ICC).
+        
+4. Let's fit the above model (more on 'fitting' near the end of class today) for our schools example.
+    i. In R, there are two commonly used libraries for linear models with random effects: nlme and lme4.  The lme4 library and corresponding ```lmer``` command will primarily be used in this course.
+        a. `lmer(mathkind~ses+(1|schoolid))` is the syntax for a basic random intercept model.
+        b. The nested structure is specified inside parentheses and uses a vertical bar, '|' to indicate the name of the grouping factor.  The '1' indicates a random intercept.
+        c. The default fitting method is known as REML – we will discuss this later.
+    ii. Question: Do you have *intuition* for what a random effect is?
+    ```{r lmer1,size='tiny', include=showR, echo=showR}
+require(lme4)
+require(lmerTest)
+lme1 <- lmer(mathkind~ses+(1|schoolid),data=dat)
+print(summary(lme1))
+rand(lme1)
+    ```
+5. Discussion of model fit results
+    i. The components of this nested data model are divided into two sections.	
+        a.  Random effects: listed as schoolid (intercept) is the estimated variance $\hat{\sigma}^2_\zeta$ in level differences $\zeta_j$ between schools.  The value, 309, should be compared to the estimated residual variance, $\hat{\sigma}_\varepsilon^2$, 1308.
+        a.  Fixed effects table (this label is controversial).  The effect of a one unit change in SES on MATHKIND is 10.72, controlling for differences between schools, if our model and its assumptions are correct.
+    ii.	The fraction of total variance accounted for by differences between groups is 309/(309+1308) = 0.19.  This is also an estimate of the correlation between subjects within schools (and is the ICC).
+    iii. To know whether the random effects were 'warranted', we conduct a likelihood ratio (LR) test, as the model with and without the random effects are nested.  The null tested is $H_0: \sigma^2_\zeta=0$ using lmerTest package's `rand` function.  
+        a. The additional effects are warranted (p<.0001).  
+
+## Simpler baseline models
+1. Some researchers prefer to start with simpler initial models.  Typically, these include at least one random effect, but no predictors.  This is called an *unconditional means model* (UMM).
+    i. *Why do it?* It documents the extent to which variation appears to be between vs. within grouping factor(s).
+    i.	For school data, we can fit 
+$$
+MATHKIND_{ij} = b_0  + \zeta_j + \varepsilon_{ij},\mbox{ with }\zeta_j\sim N(0,\sigma_\zeta^2), \varepsilon_{ij} \sim N(0,\sigma_\varepsilon^2),\mbox{ indep.}
+$$ 
+        a.  Note: for those who are familiar with panel data models, clearly the UMM is more appropriate as a baseline model for nested data as contrasted to panel data (why?).
+    ii.	Our lmer model simply drops the predictor SES, leaving: `lmer(mathkind~(1|schoolid))`
+    ```{r lmer2,size='tiny', include=showR, echo=showR}
+lme2 <- lmer(mathkind~(1|schoolid),data=dat)
+print(summary(lme2))
+rand(lme2)
+    ```
+    iii. The fixed effects are uninteresting – simply a constant is reported.
+    iv. LR test indicates significant random effects (they are needed)
+    v. The variances of the random effects are interesting.  Using the formula
+$ICC=\frac{{\sigma_\zeta^2}}{{\sigma_\zeta^2 + \sigma_\varepsilon^2}}$, we see that 364.3/(364.3+1344.5)=21% of the variance is between schools (Reminder: ICC stands for intraclass correlation coefficient).  This suggests that if we had school-level predictors, they might 'explain' some of this variation.  Similarly, the 79% of the variation that is within schools might be explainable via student level (within-group) predictors.  
+2. We have been focusing on schools as the grouping factor, but we have an even smaller grouping factor: classrooms. We can just as easily fit a model with groups determined by classrooms, which happen to be nested within schools.
+    i. Three layers of nesting can be made explicit in the notation.  Student $i$ is in classroom $j$ in school $k$ (we had to 'insert' classroom before school, so the index for school becomes $k$). So one version of a model for outcomes is: 
+    $$
+    MATHKIND_{ijk} = b_0  + \eta_{jk} + \varepsilon_{ijk},\ \mbox{with}\ \eta_{jk} \sim N(0,\sigma_\eta^2)\ \mbox{and}\ \varepsilon_{ijk} \sim N(0,\sigma_\varepsilon^2);\ \mbox{with}\ \eta\perp\varepsilon 
+    $$ 
+    ii. In this model, the random effect associated with classrooms introduces a new symbol, $\eta_{jk}$, to distinguish it from any school-level effects.  The subscripts reflect the fact that classrooms are nested within schools. As before random effects and error are assumed independent of one another 
+        a.  Notice that we have added an 'extra' index to the residual term).
+    iii. Notationally, we prefer to index classroom effects by $jk$ because there could be two classrooms indexed by '$j=1$' in two different schools (or just to organize the construction of effects).  $\eta_{jk}$ represents the effect for the $j^{th}$ classroom in the $k^{th}$ school. 
+    iv. With lmer, we use the syntax:  `lmer(mathkind~(1|classid))` which indicates that there is a random intercept for the groups determined by classrooms (note that in this data, classid is unique between school as well.  Had it not been, we would use `schoolid:classid` to refer to the unique index).  The resulting fit is given next. 
+    ```{r lmer3,size='tiny', include=showR, echo=showR}
+lme3 <- lmer(mathkind~(1|classid),data=dat)
+print(summary(lme3))
+rand(lme3)
+    ```
+    iv. (cont.)
+        a.  The LR test indicates significant random effects for classrooms (this should not be surprising, since it was true for schools – *why does this follow?*)
+        a.  Using the formula $ICC=\frac{{\sigma_\eta^2}}{{\sigma_\eta^2 + \sigma_\varepsilon^2}}$, we see that 425/(425+1306)=25% of the variance is between classrooms (ignoring schools).
+        a.  With more of the variance 'explained' by differences between classrooms, is this a better model (than the school-level model)?  Perhaps, but this is not the way to make the assessment.
+        
+## Two levels of nesting (schools and classrooms)
+1. We now extend our example to include school-level effects in addition to the classroom level effects.  
+    i. The general outcome is $Y_{ijk}$, for student $i$ in classroom $j$ in school $k$.
+    ii. For now, we assume that there is only one observation per student (no repeated measures).
+    iii. We introduced notation that specifies *effects* for classrooms and schools separately, but their different names $\eta_{jk},\zeta_k$   allow us to use them both in the same model.  Notice how our random effects use just enough indices to be identifiable:  
+        a.  $\zeta_k$ suffices for schools: we don't need a classroom index, because all classrooms in school k will get this effect.  
+        b.  $\eta_{jk}$ represents the effect for the $j^{th}$ classroom in the $k^{th}$ school; all students in that classroom will get this effect.  
+        c.  An unconditional means model for the outcome (no covariates), that includes effects for both schools and classrooms would then be specified as: 
+        $$Y_{ijk}=b_0+\eta_{jk}+\zeta_k+\varepsilon_{ijk}$$  
+        d.  Reminders: $MATHKIND_{ijk}=Y_{ijk}$ in our example; The random effects $(\eta_{jk},\zeta_k)$ are taken as mutually independent and normally distributed, with level-specific variances, $\sigma_\eta^2,\sigma_\zeta^2$, resp.; both are assumed independent of $\varepsilon_{ijk}$ as well.
+            + We write these distributional assumptions as:         $\eta_{jk}\sim N(0,\sigma_\eta^2)$, $\zeta_{k}\sim N(0,\sigma_\zeta^2)$, independently of each other and $\varepsilon_{ijk}\sim N(0,\sigma_\varepsilon^2)$.
+2.	We fit the model $Y_{ijk}=b_0+\eta_{jk}+\zeta_k+\varepsilon_{ijk}$, in which schools and classrooms are modeled together.  We interpret parameters in such a model as follows: net of school effects, how much additional systematic variation exists at the classroom level (in this case, level differences)?
+    i. In the following R code, the order of the two random effects is important.  Since classrooms are nested within schools, schoolid should be listed first.
+    ii. Failure to organize the nesting properly can result in a misspecified model – in this case, nesting schools within classrooms will generate more than one school effect for the same school, which is not correct.
+        a.  Note that two sets of group identifiers and a slightly different syntax is used.
+        b. In computing the likelihood ratio test of significance for the random effects variance, the syntax changes as well.
+    ```{r lmer4,size='tiny', include=showR, echo=showR}
+lme4 <- lmer(mathkind~(1|schoolid/classid),data=dat)
+print(summary(lme4))
+lm0 <- lm(mathkind~1,data=dat) # linear model with same 'fixed' effects but no random effects
+anova(lme4,lm0,refit=F) #test the significance of random effects (jointly).
+    ```
+    iii. The estimated variances are: $\hat{\sigma}^2_\eta=32.0;\ \hat{\sigma}^2_\zeta=352.8$. 
+    iv.	We can extend the formula for proportion of variance 'explained' by each effect.  We simply include only one random effect variance at a time in the numerator, and sum all variance components in the denominator.
+        a.  So, 353/(353+32+1323), or about 21% of the variation is between schools, while 32/(353+32+1323), or 2% is between classrooms, *net of schools*; the remaining variation is within classrooms at the student level.
+    v. Important: the last line of output gives an LR test that suggests that the model is improved significantly when both effects are included *(as compared to linear regression)*.
+3. We now add a covariate to the model $Y_{ijk}=b_0+b_1SES_{ijk}+\eta_{jk}+\zeta_k+\varepsilon_{ijk}$, in which schools and classrooms are modeled together.  We interpret the effect for that covariate as follows: *net of school and classroom effects, what is the impact of a student's SES on our outcome, MATHKIND?*
+    ```{r lmer5,size='tiny', include=showR, echo=showR}
+lme5 <- lmer(mathkind~ses+(1|schoolid/classid),data=dat)
+print(summary(lme5))
+lm1 <- lm(mathkind~ses,data=dat) # linear model with ses 'fixed' effects but no random effects
+anova(lme5,lm1,refit=F) 
+    ```
+    i. In terms of proportion of variation, 302/(302+20+1294), or about 19% of the *total* variation is between schools, while 20/(302+20+1294), or 1% is between classrooms, *net of schools and SES*; the remaining variation is within classrooms at the student level.
+    ii. The last lines give an LR test that suggests that the model is improved significantly when both effects are included.  If you want to test the need for just one effect, such as $\sigma^2_\eta$, you need another procedure.
+        a.  The estimate of $\hat{\sigma}^2_\eta=20$, which is very small.  We can 'request' confidence intervals as follows:
+```{r confInt, size='tiny', include=showR, echo=showR}
+ci <- confint(lme5)
+ci[1:3,]^2  #only display for variance components (and square to make variances)
+```
+2. (cont.)
+    ii. (cont.)
+        a. (cont.)
+            + But...confidence bounds for variance terms can never cross zero (conceptually, and estimation is constrained to prevent it), as variances are always positive.
+        a.  We need another way to test $H_0:\sigma^2_\eta=0$.
+    iii. To assess whether adding classroom effects, in addition to school effects is warranted, we do a likelihood ratio (LR) test comparing the a model without these effects to one that contains them.  The models are nested, and the only difference between them is that in one, $\sigma^2_\eta=0$, so the LR test will determine how unusual our results are, assuming this variance to be zero under the null.  Sequentially:  
+        a.  We run the simpler model and store its estimates (this has already been done, as model `lme1`).  
+        b.  We run the more complex model and store its estimates (already done, as model `lme5`).  
+        c. 	The LR test used the `anova` command (unless we specify refit=F, it automatically refits using ML not REML--to be explained in subsequent handouts).  
+        d. Note that we show you two ways to attempt to derive this test.  The first is direct (fit 2 nested models); the second derives multiple tests, and the ordering is such that it tests each random effect in the presence of the other, so we get the same result.  
+```{r anova1,size='tiny', include=showR, echo=showR}
+anova(lme1,lme5,refit=F)
+rand(lme5)
+```
+
+ii. (cont.)  
+       a. The p-value (0.61) suggests that we don't need classroom level effects (we do not reject the null--*Are you surprised?*), but a "better" p-value divides this by 2 to reflect the evaluation on the boundary of the parameter space.[^1]
+
+[^1]: See Stram, D., & Lee, J. (1994). Variance Components Testing in the Longitudinal Mixed Effects Model. Biometrics, 50(4), 1171-1177. doi:10.2307/2533455
+ 
+## OLS & MLE (sketch)
+1.	In this course, we rely exclusively on the theory associated with Maximum Likelihood Estimation (MLE) and you may not have been exposed to it very much (APSTA-GE.2122 delves into the details).  These notes are an attempt to give you an idea of the method and contrast it to OLS, which you know from regression.
+    i. Example: determining the mean of a population of known variance by examining a sample.
+        a.  This is a classic example.  It seems easy – just take the mean of the sample, and you have a good estimate of the mean of the population from which it was derived, right?  Yes, but why is this a good idea?
+        a.  There are certainly more complicated situations in which finding the "best" parameters isn't straightforward... and *you are in this situation in this course!*
+    ii.	To make progress with this concern, we have to make the assumptions more explicit.  Let us say that we have a population of size N (very large) and we know that it is normally distributed with standard deviation one.  We just don't know the mean of this population, which we will call $\mu$.
+    iii. We say that the data generating process (DGP) – the mechanism by which observations, X, are generated, is $X\sim N(\mu,1)$ (a normal distribution with s.d.=1, so the variance is also 1).
+    iv.	The probability of observing a single X from this distribution derives from the density:  
+$$f(X|\mu ) = \frac{1}{{\sqrt {2\pi } }}{e^{\frac{{ - {{(X - \mu )}^2}}}{2}}}$$
+This is called the density of X given $\mu$ (so $\mu$ is fixed); you can think of it as defining the shape of the histogram you would get if you sampled millions of observations of X (so you know which X values are more or less likely).  Here is what it looks like for $\mu=0$:
+    ```{r norm1,size='tiny', include=showR, echo=showR}
+set.seed(2042001)
+#normal mean example:
+#standard normal density displayed:
+grd <- seq(-4,4,length=9*100)
+plot(grd,dnorm(grd),type='l',xlab='X',ylab=expression(f(paste(X,"|",mu))))
+dens <- density(rnorm(10000000))
+x1 <- min(which(dens$x >= 2))  
+x2 <- max(which(dens$x < 5))
+with(dens, polygon(x=c(x[c(x1,x1:x2,x2)]), y= c(0, y[x1:x2], 0), col="gray"))
+    ```
+    iv. (cont.)
+        a.  This is a familiar picture, and it allows you to calculate a probability.  For example, P(X>2) is given by the shaded area  under the curve.  And X "near" 0 is most likely, while X "near" 4 is very unlikely.
+        a.  With a simple switch of the ordering, we define what we call the likelihood of $\mu$ given X [this is different, conceptually]. ${\cal L}(\mu\vert X)=f(X\vert \mu)$.  The conceptual difference is that we ask ourselves, which values of $\mu$ are most likely to have *given rise to the observed data*, X (thus conditioning on X), assuming the model is correct?  
+3.  We can also evaluate the density of M *multiple* independent (standard normal) observations $(X_1,\ldots,X_M)$.  It is:  
+$$
+f({X_1},...,{X_M}|\mu ) = \prod\limits_{i = 1}^M {\frac{1}{{\sqrt {2\pi } }}{e^{\frac{{ - {{({X_i} - \mu )}^2}}}{2}}} = } \frac{1}{{{{(2\pi )}^{M/2}}}}{e^{\frac{{ - \sum\limits_{i = 1}^M {{{({X_i} - \mu )}^2}} }}{2}}}
+$$
+and the corresponding likelihood is ${\cal L}(\mu |{X_1},...,{X_M}) = f({X_1},...,{X_M}|\mu )$  
+4. In real situations, we observe $X_1,\ldots,X_M$  and wish to infer $\mu$.  The principle of Maximum Likelihood says that we should choose $\mu$ so that the log-likelihood, defined as
+$\ell(\mu |{X_1},...,{X_M}) = \log f({X_1},...,{X_M}|\mu )
+ =  - \tfrac{M}{2}\log (2\pi ) - \tfrac{1}{2}\sum\limits_{i = 1}^M {{{({X_i} - \mu )}^2}}$
+is maximized (over the range of valid $\mu$). 
+    i. Example (cont.): Say we have some number of independent observations, X, from a standard normal distribution, so the truth is that $\mu=0$.  Here is a density plot from a draw of 30:
+    ```{r mle0,size='tiny', include=showR, echo=showR}
+#sample from DGP:
+N <- 30
+x <- rnorm(N)
+plot(density(x))
+    ```
+    ii. To apply the Principle of Maximum Likelihood, we calculate
+$\ell(\mu |{X_1},...,{X_M}) = \log f({X_1},...,{X_M}|\mu )$
+for a range of $\mu$ and report the value that maximizes the log-likelihood $\ell$. We did this for a grid of points between -4 and 4 and we get this plot.
+    ```{r mle1,size='tiny', include=showR, echo=showR}
+#set up for MLE: need the likelihood function (R codes this as dnorm):
+loglik.norm <- function(x,mu,sd=1) sum(dnorm(x,mean=mu,sd=sd,log=T))
+#grid search - crude MLE
+grd <- seq(-4,4,length=9*10)
+ll <- rep(NA,length(grd))  #store loglik values here
+#compute ll across grid
+for (i in 1:length(grd)) ll[i] <- loglik.norm(x,mu=grd[i])
+#plot ll across grid
+plot(grd,ll,type='p',pch=3,ylab='log-likelihood',xlab='proposed mu')
+lines(grd,ll,col=8) #connect the points
+abline(v=0,col=2) #true value of mu from population
+    ```
+    iii. Clearly the choice of $\mu$ that maximizes the log-likelihood is 0.  It turns out that is also the mean of this sample (to a close approximation).
+    iv. You may have noticed that we were trying to find the $\mu$ that maximizes: 
+$-\tfrac{M}{2}\log (2\pi)-\tfrac{1}{2}\sum\limits_{i=1}^M{(X_i-\mu)^2}$
+and that since the first term is a constant, this will be a maximum when
+$\sum\limits_{i=1}^M{(X_i-\mu)^2}$ is minimized. There are lots of ways to find the minimum of that expression (those who know calculus should see that this quadratic is minimized at the sample mean), but for now, just notice that the expression looks a lot like the sum of squared residuals.  The term "least squares" should come to mind.  
+5. If you had a regression model ($X$ as outcome) $X_i = b_0 + \varepsilon_i$ with the usual assumptions of independent normal errors, then an OLS approach to finding an estimate $\hat{b}_0$  would be to compute residuals from the model over different values of $b_0$ and chose $\hat{b}_0$ such that it minimizes the sum of squared residuals: $\sum\limits_{i=1}^M{(X_i-b_0)^2}$.  This should look familiar – it is the criterion used in the maximization of the log-likelihood, above, with $b_0$ substituted for $\mu$.  
+    i. For the estimation of unknown mean and known variance, the MLE and the OLS solution are identical and lead to optimizing with respect to the same sum of squares criterion.  
+6. Example 2: Poisson regression
+    i. In this instance, OLS and MLE give different answers, and you would not "trust" the OLS results.  We need to be clear, though, that by OLS, we mean applying a sum of squared residuals criterion to search for an "optimal" set of regression parameters. 
+    ii. The model (for one explanatory predictor, and constant exposure) is:
+$\ln {\lambda_i} = {b_0} + {b_1}{X_i}$,
+and $Y_i\sim Pois(\lambda_i)$
+(Y is a Poisson random variable with rate $\lambda_i$).
+Residuals from the model are of the form:${Y_i} - \exp ({b_0} + {b_1}{X_i})$, where $\exp(x)=e^x$.       
+    iii. Using a likelihood-based approach, the density of Y (a count) follows a Poisson distribution:
+$f({Y_i}|{X_i},{b_0},{b_1}) = \frac{{{e^{ - {\lambda_i}}}{\lambda_i}^{{Y_i}}}}{{{Y_i}!}}$, 
+where $\ln {\lambda_i} = {b_0} + {b_1}{X_i}$.  
+    iv. When we extend this to M independent observations, the density becomes: 
+$$
+f({Y_1}, \ldots ,{Y_M}|{X_1}, \ldots ,{X_M},{b_0},{b_1}) =
+\frac{{{e^{ - {\lambda_1}}}{\lambda_1}^{{Y_i}}}}{{{Y_1}!}} \cdots \frac{{{e^{ - {\lambda_M}}}{\lambda_M}^{{Y_M}}}}{{{Y_M}!}}
+$$
+    with $\ln{\lambda_i}={b_0}+{b_1}{X_i}\ \mbox{for}\ i=1,\ldots,M$.  Change $X_i$ and you change the rate $\lambda_i$.
+    v. A likelihood based approach reverses this equation, so that you try to maximize (over $b_0,b_1$):
+    $$
+{\cal L}({b_0},{b_1}|{X_1}, \ldots ,{X_M},{Y_1}, \ldots ,{Y_M}) = f({Y_1}, \ldots ,{Y_M}|{X_1}, \ldots ,{X_M},{b_0},{b_1})
+    $$
+        a.  You can imagine using a grid search through plausible $b_0,b_1$ until you find one that maximizes that likelihood.
+        a.  The OLS approach would try to *minimize* $\sum\limits_{i = 1}^M {{{({Y_i} - \exp ({b_0} + {b_1}{X_i}))}^2}}$ over plausible $b_0,b_1$.
+    vi. We did a grid search over plausible $b_0,b_1$ using this OLS approach, in which the true model was  $Y_i\sim Pois(\lambda_i)$, with $\ln {\lambda_i} =  - 0.5 + 0.5{X_i}$. We took a sample of size 3000, drawing X from a standard normal, and Y from a Poisson process, corresponding to the rates given by the "regression" portion of the model.  We would hope to discover that $\hat{b}_0=-0.5;\ \hat{b}_1=0.5$ (the truth).
+        a.  In our simulation, the OLS approach, minimizing sum of squared residuals, we get  $\hat{b}_0=-0.49;\ \hat{b}_1=0.46$. Here are some details:
+    ```{r pois_grid,size='tiny', include=showR, echo=showR}
+    #poisson example
+    set.seed(3)
+    N<-3000
+    x <- rnorm(N)
+    rt <- exp(-.5+.5*x) #model for poisson rate
+    y <- rpois(N,rt)  #generate data
+    #use Sum Sqs criterion to search for best params in poisson model.  this fn computes the sum sqs
+    ssq.pois <- function(betas,x,y) {
+	    n <- dim(betas)[1]
+	    muhat <- betas%*%rbind(1,x)
+  	  res <- matrix(rep(y,n),nrow=n,byrow=T) - exp(muhat)
+	    ssq <- apply(res*res,1,sum)    
+	    ssq
+     }
+#set up for grid search
+grd.len <- 4*5*10 #*2 for speedup
+grd <- seq(-1,2,length=grd.len)
+betas <- as.matrix(merge(grd,grd))  #trick to build the crossproduct of grid values in range (-1,2) for 2-D search
+ssq <- ssq.pois(betas,x,y) #this computes all 200*200 search points Sum Sqs rslts
+contour(x=grd,y=grd,z=ssq.mat<-matrix(log(ssq),grd.len,grd.len,byrow=F),xlab="b0",ylab="b1")
+min.loc <- which(ssq.mat==min(ssq.mat), arr.ind=T)
+cat("Grid-based fit (b0, b1): ",grd[min.loc])
+points(grd[min.loc[1]],grd[min.loc[2]],col=4,pch=1,cex=2)
+abline(v=grd[min.loc[1]],col=2)
+abline(h=grd[min.loc[2]],col=2)
+    ```
+    v. The MLE approach yields this: 
+    ```{r pois_mle,size='tiny', include=showR, echo=showR}
+    fit <- glm(y~x,family="poisson")
+    summary(fit)
+    ```
+    vi. The results are not terribly different, although with 3000 observations, one would expect to be able to recover the DGP parameters fairly precisely.  And the MLE-based approach did get closer to the "truth."
+        a.  But you must also ask yourself another question: if I use the result from OLS for Poisson regression, *what are my confidence intervals for those estimates*?
