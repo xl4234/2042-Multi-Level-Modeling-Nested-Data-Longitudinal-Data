@@ -1,0 +1,221 @@
+---
+title: "MLM Nested Handout 2 (Spring 2022)"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+    ```{r setup, include=FALSE, echo=F}
+knitr::opts_chunk$set(echo=TRUE,tidy=TRUE)
+# make sure dir struct is like: "~/Dropbox/Teaching/MLM Nested_Sp22/Handouts"
+    library(lattice)
+    library(ggplot2)
+    #set "vanillaR" flag for use of ggplot or not (when implemented)
+    vanillaR <- F
+    showR <- T
+    ```
+
+# MLM conceptualization, notation and effects
+## Classroom data example
+1.  Even though three levels of nesting are present in our classroom data, we now conceptualize MLMs using a simpler model containing an individual-level predictor and effects only for schools (*we will eventually bring classrooms back into the picture*):
+    a. This is the model under consideration:
+    $Y_{ijk} = b_0 + b_1 X_{1ijk} + \zeta_k + \varepsilon_{ijk}$; $\zeta_k\sim N(0,\sigma^2_\zeta)$ independent of $\varepsilon_{ijk}\sim N(0,\sigma^2_\epsilon)$.
+    b. We now work through some different conceptualizations of the components of this model structure. Each one contributes different insight into what it means to include random effects in a model.  
+2. Conceptualization \#1: random effects are part of a more complex error structure.
+    a. Let $\varepsilon_{ijk}' = \zeta_k + \varepsilon_{ijk}$ . Then $Y_{ijk} = b_0 + b_1 X_{1ijk} + \varepsilon_{ijk}'$ -- the second equation sure looks a lot like 'plain old' regression. But these new *error terms are not independent* across subjects in the same school.
+    b. The error term $\varepsilon_{ijk}'$ has two parts:
+        i.  A *structured* component $\zeta_k$ (between groups)
+        ii. An *unstructured* component $\varepsilon_{ijk}$ (within groups)
+    c. The indices (subscripts) tell us a lot about what type of variation we are identifying:
+        i. $\zeta_k$  represents a property of school *k* ('error' for the school?)
+        ii. $\varepsilon_{ijk}$ represents error for student *i* (in classroom *j*) in school *k*
+    d. Returning to the term $\zeta_k + \varepsilon_{ijk}$, the fact that $\zeta_k$ 'repeats' across observations in the same school captures a form of dependence with certain properties:^[We will make use of these definitions/identities: Cov(X,Y) = E(XY)- E(X)E(Y); Cor(X,Y) = Cov(X,Y)/sqrt(V(X))sqrt(V(Y)); Var(X+Y)=Var(X)+Var(Y)+2Cov(X,Y).]
+        i.  Covariance between errors from students in the same school: 
+        $$
+        Cov(\varepsilon_{ijk}',\varepsilon_{i'j'k}') = Cov(\zeta_k + \varepsilon_{ijk},\zeta_k + \varepsilon_{i'j'k}) 
+        $$
+        $$
+        = Cov(\zeta_k,\zeta_k)+Cov(\varepsilon_{ijk},\varepsilon_{i'j'k})+Cov(\zeta_k,\varepsilon_{ijk})+Cov(\zeta_k,\varepsilon_{i'j'k})  
+        $$
+        $$
+        = Var(\zeta_k)+0+0+0  = \sigma^2_\zeta \mbox{ (not zero!)}
+        %\mbox{ by all of our assumptions}
+        $$
+        ii. Note as well that in the same school, $Var(\varepsilon_{ijk}') = Var(\zeta_k)+Var(\varepsilon_{ijk})+2Cov(\zeta_k,\varepsilon_{ijk})=\sigma^2_\zeta+\sigma^2_\varepsilon = Var(\varepsilon_{i'j'k}')$. 
+            1.  The cross-product (covariance) terms in the variance calculation are zero, so it is just the sum of two variances.
+        iii. This implies that $Cor(\varepsilon_{ijk}',\varepsilon_{i'j'k}') = \frac{\sigma^2_\zeta}{(\sqrt{\sigma^2_\zeta+\sigma^2_\varepsilon})^2}$, which corresponds to our measure of the proportion of variation that is between schools (ignoring classrooms). It is also the formula for the *Intraclass Correlation Coefficient* (ICC). Reminder: make note of this formula (you have seen it in Handout 1 as well).
+            1.  We have just shown that – net of the mean, so holding the predictors constant – the ICC is the correlation between a random pair of observations within the same school (*k*), induced by our model. 
+    e.  Identification: we can learn about $\zeta_k$ for a specific school *k*, and identify the effect, by looking for systematic, *mean differences in level* for all students in that school. __HERE IS A WAY TO CONCEPTUALIZE THIS__: Imagine that you ran OLS regression on your outcome, ignoring the nested nature of your data. If, for some schools, the structured error terms $\{\varepsilon_{ijk}'\}_{\cdot k}$ (there are many of these; this is a notation for all errors (including the structured part) for school *k*, as we have defined them) are typically 'high,' while for other schools they are typically low, then we can associate those high or low levels with each school through component $\zeta_k$. 
+        i.  We will do this, constructively, in a section that follows.  
+3. Conceptualization \#2: effects are latent variables
+    a.  Some insight can be gained if one thinks of $\zeta_k$ as a latent variable, which is a fancy way of saying the combined effect of unobserved characteristics.
+        i.  We sometimes say that observations $Y_{ijk}$, all in school *k*, share a latent trait $\zeta_k$ that reflects something about the school.
+        ii. Observations are driven by the (structured) error, so if the errors are driven by a latent trait, then so are the observations.
+    b.  This can be characterized (for the structured errors) by a path diagram (for the same school *k*):  
+    ![](LatentTraitDiagram.pdf)  
+        i.  The latent trait $\zeta_k$ is shared by structured error terms, $\varepsilon_{ijk}',\varepsilon_{i'j'k}'$, and thus outcomes, $Y_{ijk},Y_{i'j'k}$.  
+4.  Conceptualization \#3: random coefficients
+    a.  We can regroup the terms in the complex error:
+        i.  Starting with ${Y_{ijk}} = {b_0} + {b_1}{X_{1ijk}} + {\varepsilon '_{ijk}}$, we substitute in the expression for the error: ${Y_{ijk}} = {b_0} + {b_1}{X_{1ijk}} + ({\zeta_k} + {\varepsilon_{ijk}})$ 
+        ii. And now regroup: ${Y_{ijk}} = ({b_0} + {\zeta_k}) + {b_1}{X_{1ijk}} + {\varepsilon_{ijk}}$.
+        iii. And finally, rename & re-index: ${Y_{ijk}} = ({\beta_{0k}}) + {b_1}{X_{1ijk}} + {\varepsilon_{ijk}}$, where ${\beta_{0k}} = {b_0} + {\zeta_k}$.
+        iv. The term ${\beta_{0k}} = {b_0} + {\zeta_k}$ is a 'random coefficient' (or random intercept) that varies by school, not by student *i* in school, or even by classroom (yet).
+            1.  Every student in school *k* has regression intercept ${\beta_{0k}}$, not just plain old ${b_{0}}$. Since *k* can vary across all possible school indices, this yields many school-specific intercepts.
+            2.  This is not the same as running separate regressions for each school. *(crucial to understand why)*
+    b.  There are different ways to describe this formulation: *random coefficients*, *random regression*. It is also closely aligned with 'hierarchical' or 'level' notation, to be introduced next.  
+5.  Conceptualization \#4, separate equations for different (nested) levels.
+    a.  School data is naturally hierarchical, and we have already introduced predictors that vary at different "levels" of the nested data structure. We now make this explicit through the use of notation.
+    b.  First, we copy the re-indexed version of our model presented in Section 4, and call this "level 1": 
+        i.  Level 1 is the topmost level and terms that are listed should require the maximal number of subscripts. With nested data, it is usually the subject level, as in outcome ${Y_{ijk}}$.
+        ii. Level 1: ${Y_{ijk}} = {\beta_{0k}} + {\beta_{1k}}{X_{1ijk}} + {\varepsilon_{ijk}}$, ${\varepsilon_{ijk}} \sim N(0,\sigma_\varepsilon ^2)$
+        iii. There are many terms in this equation that vary by school: the outcome, the predictor, the error, the intercept and the slope on the predictor. That's right, the *intercept and slope are school-specific*. If we assign a distribution to the intercept term (only) such that it is based on a random variable, such as a draw from a normal distribution, we call this a *random intercepts model*. 
+        iv. We further specify terms such as ${\beta_{0k}}$ at 'lower' levels, in this case level 2 will be used.
+        v.  Level 2: ${\beta_{0k}} = {b_0} + {\zeta_{0k}}$, ${\zeta_{0k}} \sim N(0,\sigma_{{\zeta_0}}^2)$, and ${\beta_{1k}} = {b_1}$, where ${\varepsilon_{ijk}},{\zeta_{0k}}$ are assumed independent. The '0' in the subscript allows for naming additional random effects; e.g., $\zeta_{1k}$ or $\zeta_{2k}$.
+        vi. Each of these equations can be made more or less complex. For example, we can remove the level 2 error term, ${\zeta_{0k}}$ (yes, this is an error term, but a *structured* or group-level error term), and then we have regression, ignoring any correlation structure in the errors:
+            1.  Level 1: ${Y_{ijk}} = {\beta_{0k}} + \beta_{1k} X_{1ijk} + {\varepsilon_{ijk}}$, ${\varepsilon_{ijk}} \sim N(0,\sigma_\varepsilon ^2)$ 
+            2.  Level 2: ${\beta_{0k}} = {b_0}$; ${\beta_{1k}} = {b_1}$
+    c.  Why go to so much trouble, notationally?
+        i.  The levels are organized directly around the nesting principle (an example follows soon).
+        ii. There are "rules" associated with what can be included (predictors and error terms) at each level, ensuring some quality control (fewer coding/conceptualizing mistakes).
+        iii. There is a sense that each equation is a *mini-regression*, and as such, one can think about explaining variation at different levels with different equations. 
+        iv. The notation is extremely common in much of the literature.
+        v.  Two software packages, HLM and MLwiN are based on this organizing principle. 
+        vi. Moving between this notation and the alternative, used by STATA/SAS/R simply involves algebraic substitution.
+        
+## A constructive basis for random effects
+
+1.  While we will not directly estimate effects $\zeta_k$ for each school $k$, we can gather evidence that the information about them exists in our data.
+    a.  Recall conceptualization \#1: according to that model, the errors from a regression look like this: $\varepsilon_{ijk}' = \zeta_k + \varepsilon_{ijk}$.  We can't easily separate the two components (yet), but we can look at their sum for any grouping.   
+        i.  In regular regression, one examines residuals to evaluate potential omitted variables. For example, one can produce boxplots by an omitted categorical variable. When there are no omitted predictors, these groups should have roughly the same mean and variance.
+    b. Models that fail to include "effects" for schools essentially omit a variable, and this can be detected in a residual analysis. 
+    c.  Below, we run a simple OLS regression of MATHKIND on SES, generate the residuals and then use a boxplot by school to see whether school effects strong enough that we notice their omission.  
+    ```{r reg1, include=showR, echo=showR}
+    require(lme4)
+    require(lmerTest)
+    dat <- read.csv("../Datasets/classroom.csv")
+    #simple regression
+    fit1 <- lm(mathkind~ses,data=dat)
+    print(summary(fit1)) 
+    dat$res1 <- residuals(fit1)
+    if (vanillaR) {
+       boxplot(split(dat$res1,dat$schoolid)) 
+    } else {
+       ggplot(dat, aes(x = factor(schoolid), y = res1)) + geom_boxplot()
+    }
+    ```
+    c. It is a bit hard to 'see' what the average shift up or down would be at the school level. Maybe a boxplot will reveal some of the structure (this time, we generate residuals directly):  
+        i. We do see a fair amount of variation in the level, represented by the median residual for each school.
+        ii. If the errors were dependent errors, we'd see structure (and we do). This observation is crucial: *if the errors were independent, the medians would be much closer to zero for every school.*^[You can calculate the s.d. of randomly distributed errors when $\sigma_\zeta^2=0$ using the Central Limit Theorem, $\sigma_\varepsilon^2$, and group size.]
+    d. Let's take the average of these residuals at the school level and use them as a first approximation—an estimate of $\zeta_k$.
+        i.  This code generates a school-level mean residual:
+    ```{r agg1, include=showR, echo=showR}
+    res1mean <- tapply(dat$res1,dat$schoolid,mean,na.rm=T) 
+    ```
+We visualize these average residuals by case number in the reduced file (this x-axis is meaningless, but useful to spread the observations apart).  
+    ```{r plot1, include=showR, echo=showR}
+    plot(res1mean);abline(h=0,col=8) 
+    ```
+2. (cont.)
+    d. (cont.)
+        ii. The main point of this plot is that different schools have different mean residuals. *There is only one data point per school,* so they do not represent variance, the data points are averages of residuals. Also note that the x-axis is arbitrary - it represents school ids.
+    e. These estimates of $\zeta_{0k}$ have a distribution (as they vary by school), which we can examine with density plots and by calculating the standard deviation (square root of variance).
+    ```{r dens1, include=showR, echo=showR}
+    plot(density(res1mean))
+    ```
+    e. (cont.)
+        i.  The standard deviation is pretty large at `r round(sd(res1mean),2)`
+        ii.  Note that because we are using R, the vector `res1mean` contains only 107 means, one for each school. If we wish to *weight* by the number of students sampled in each school, we could do it in several ways in R, but let's try using the weights option of the density function.
+    ```{r dens2, include=showR, echo=showR}
+    wts <- as.numeric(prop.table(table(dat$schoolid)))
+    plot(density(res1mean,weights=wts))  #relies on the ordering of res1mean and table() by schoolid
+    ```
+    e. (cont.)
+        iii.  And you can see a bimodality you get from the individual student perspective, but this isn't really how we conceptualize the data generation.
+    f. We can think of  average residuals as a 'crude' estimate of the structured, school-level error component ${\zeta_k}$. Or at least evidence that schools differ in a consistent (structured) manner.
+        i.  The distribution was reasonably symmetric. We computed the std. dev. of these terms, which was about 20 or 22. This is a crude estimate of the variance component $\sigma_\zeta ^2$. It tends to *overestimate* the variance - but understanding this will require more work.
+    g.  We now run a mixed model to derive a better estimate of the variance component (shortly, we'll see why it's 'better')  
+    ```{r model 1, include=showR, echo=showR}
+    lmer.fit1 <- lmer(mathkind~ses+(1|schoolid),data=dat)
+    summary(lmer.fit1)
+    ```
+    g. (cont.)
+        i. The variance component estimate (as s.d.) is $\hat{\sigma}_\zeta=$ `r round(attr(VarCorr(lmer.fit1)[[1]],"stddev"),1)`, which is a bit smaller than our prior estimates.  
+3.  Adding in a second level of nesting
+   a. Running a mixed effects model is the proper approach in many nested data applications. We now run a mixed model with three levels.
+```{r lmer3, include=showR, echo=showR}
+    fit3 <- lmer(mathkind~ses+(1|schoolid/classid),data=dat)
+    print(summary(fit3))
+    ```   
+   b. These two variance components are estimated simultaneously along with the within subject error variance $\sigma^2_\epsilon$.
+
+## Model Selection
+1.  Comparing nested models
+    a.  A common way to determine what components of a model are necessary (fixed effects or random effects), from a statistical perspective, is to conduct a significance test on some subset of the model's parameters. The test we have already introduced and will use extensively is a likelihood ratio test (LRT or LR test).  
+        i. In this setting, parameters are added to an existing model, establishing a "nesting" of one model in the other that facilitates the LR test. 
+    b.  When all of the parameters considered are regression coefficients (fixed effects), then the tests are for statistical differences from zero, either singly, or as a vector. T-tests of single coefficents and Wald tests for blocks of coefficients may be used.  
+2.  Selecting random effects (first pass)
+    a.  A natural consideration in building mixed effects models is the presence and complexity of the random effects.
+    b.  The very first question to ask is whether *any* random effects are needed. We will use the classroom data, beginning with a model for MATHGAIN with no covariates: $MATHGAIN_{ijk} = {b_0} + \zeta_k+ \varepsilon_{ijk}$, with ${\zeta_k} \sim N(0,\sigma_\zeta ^2)$ and ${\varepsilon_{ijk}} \sim N(0,\sigma_\varepsilon ^2)$ independently of one another. Recall that this is called the *unconditional means model*. The 'extra' subscripts are intentionally included, as they will become important as we add random effects for classrooms.
+        i.  We want to use an LRT to compare a model with no random effects to one with random effects for schools, but it can be challenging to fit a model *with no random effects* (yes, this is plain old regression, but we need to be able to compare likelihoods, and that isn't set up (in a simple manner) under R's lm and lmer functions, so one way around this is to use the function `ranova` in the lmerTest library in R). `ranova` makes this possible by listing what is *deleted* and then computing an LRT. 
+    ```{r test2, include=showR, echo=showR}
+    lmer.fit2 <- lmer(mathgain~(1|schoolid),data=dat)
+    ranova(lmer.fit2)
+    ```
+    c. A more interesting comparison would be whether we need to add a random classroom effect, *after controlling for school effects*, and this is an LRT.
+        i.  If we add random classroom effects to the last model and then compare likelihoods with an LRT, we have an answer to this question.
+        ii. The model to examine is  $MATHGAIN_{ijk} = {b_0} + \eta_{jk} + \zeta_k+ \varepsilon_{ijk}$, with the usual normality and independence assumptions on all random terms.  
+```{r test3, include=showR, echo=showR}
+    lmer.fit3 <- lmer(mathgain~(1|schoolid/classid),data=dat)
+    anova(lmer.fit2,lmer.fit3,refit=F)
+```    
+2. (cont.)
+    c. (cont.)
+        ii. (cont.)
+            1. We used the `anova` command, which does a sequential LRT based on the listed model fits. 
+            2. The chi-square test, on one degree of freedom (corresponding to the additional variance component) is highly significant, with p<0.01. Conclusion: inclusion of classroom effects is warranted. 
+            3. Question: can we use the LRT given by ranova() applied to the more complex model?  Answer: That function divises two LR tests; it is likely that we can find the test that we require (see R code that follows). *Look at what was deleted.*
+```{r test3b, include=showR, echo=showR}
+    ranova(lmer.fit3)
+```    
+2. (cont.)
+    c. (cont.)
+        ii. (cont.)
+           4. Question: *I thought we found, previously, that the classroom effects were not needed?* *Why does this result differ?*  
+3. LRTs for mixed effects models: comparing fixed effects parameters.
+    a.  Many mixed effects models are fit using 'restricted' maximum likelihood (REML). This is the default in R.
+        i.  Researchers prefer REML over what is sometimes referred to as "full" ML because the estimation of *variance components* is unbiased using REML.
+        ii. Unfortunately, we cannot use LR tests to compare the fixed effects of models fit under REML (there is another way, to be given soon).
+            1.  If you try to use REML fits to compare fixed effects, R will refit the model using ML.
+    b.  When the comparison of interest involves the fixed effects, you can force the fit to use ML (in R you let the functions that compare models call the 'refitting' procedure).
+        i.  We normally do not compare models that change both fixed and random effects at the same time, but it is possible under ML (not REML).
+    c.  Note: if you are evaluating the inclusion of a single, continuous predictor to a model, you can just look at the p-value (fixed effects output).
+        i.  Here, we explore the assessment of 'blocks' of predictors.
+    d.  Example: let's add SES and (teacher-level) MATHKNOW to our model as a 'block' and evaluate whether either is significant (the null hypothesis is that the regression coefficients for both are identically zero).
+        i.  The new model is: $MATHGAIN_{ijk} = {b_0} + b_1 SES_{ijk} + b_2 MATHKNOW_{jk} + \eta_{jk} + \zeta_k + \varepsilon_{ijk}$, with the usual normality and independence assumptions on all random terms, and will be compared to the model fit in the prior section.
+        ii. We first do this naively, using REML:  
+    ```{r test4, include=showR, echo=showR}
+    lmer.fit4 <- lmer(mathgain~ses+mathknow+(1|schoolid/classid),data=dat)
+    summary(lmer.fit4)
+    print(try(anova(lmer.fit3,lmer.fit4,refit=F)))
+    ```            
+    d. (cont.)
+        iii. It doesn't quite look like SES or MATHKNOW is significant, but we don't really know if they are jointly non-significant until we do the proper test in the `anova`, but ...
+        iv. The test we thought we could do 'fails' *for a different reason*: the problem occurred because in *fitting a model with more predictors*, we lost nine cases due to missingness. **LRTs are only legitimate when the included observations are the same in both models.**
+            1.  To remedy the situation, we can choose a subsample of observations from the dataset before performing the model estimation.  We can identify which observations were included in the model by establishing an indicator variable ('in\_sample') with that information:
+    ```{r subset1, include=showR, echo=showR}
+    save.options <- options() #so that old options can be restored
+    options(na.action='na.pass')
+    mm <- model.matrix(~mathgain+ses+mathknow,data=dat)
+    in_sample <- apply(is.na(mm),1,sum)==0 # these rows aren't missing anything
+    options(save.options)
+    #re-fit mlms using only fully observed observations, even in model with fewer predictors.
+    fit7 <- lmer(mathgain~1+(1|schoolid/classid),data=dat,subset=in_sample)
+    print(summary(fit7))
+    fit8 <- lmer(mathgain~ses+mathknow+(1|schoolid/classid),data=dat,subset=in_sample)
+    print(summary(fit8))
+    print(anova(fit7,fit8,refit=T))  #force ML fit.
+    ```
+    d. (cont.)
+        v. In this set of runs, we 'refit' with ML to properly compare the fixed effects as a block.
+        vi. The new predictors are found to be jointly non-significant, p>0.05.
+        vii. In general, *when fitting a series of sequential models, it is best if you subset the observations to reflect the 'last' (or largest) model's non-missing predictors.*

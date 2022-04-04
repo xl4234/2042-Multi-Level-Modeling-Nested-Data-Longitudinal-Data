@@ -1,0 +1,428 @@
+---
+title: "MLM Nested Handout 3 (Spring 2022)"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+    ```{r setup, include=FALSE, echo=F}
+knitr::opts_chunk$set(echo=TRUE,tidy=TRUE)
+# make sure dir struct is like: "~/Dropbox/Teaching/MLM Nested_Sp22/Handouts"
+    library(lattice)
+    library(ggplot2)
+    require(lme4)
+    require(lmerTest)
+    library(mvtnorm)
+    library(scatterplot3d)
+    require(rgl)
+    #set "vanillaR" flag for use of ggplot or not (when implemented)
+    vanillaR <- F
+    showR <- T
+    ```
+# Random Slopes, Wald Tests, a Re-examination of Inference
+## Random Slopes
+1. A very common extension of multi-level models involves what are usually called *random slopes*.
+    a. Up to this point, all effects were some form of random intercept, or level shift. 
+    b. You can see this by regrouping terms into a *random coefficients* formulation:
+$$
+MATHGAIN_{ijk} = (b_0 + \eta_{jk} + \zeta_k) + b_1 SES_{ijk} + b_2 MATHKNOW_{jk} + \varepsilon_{ijk}
+$$
+$$
+\varepsilon_{ijk}\sim N(0,\sigma_\varepsilon ^2),\ \eta_{jk}\sim N(0,\sigma_\eta ^2),\ \zeta_k\sim N(0,\sigma_\zeta ^2)\mbox{ indep.}
+$$    
+        i.   All of the components of the first term, in parentheses, generate a school- and classroom-specific shift up or down from the mean.
+        ii.  We could even re-express the equation in a form that made this explicit: 
+$$
+        MATHGAIN_{ijk} = \beta_{0jk} + b_1 SES_{ijk} + b_2 MATHKNOW_{jk} + \varepsilon_{ijk},
+$$
+where ${\beta_{0jk}} = {b_0} + {\eta_{jk}} + {\zeta_k}$ varies by both school and classroom (we sometimes call this the level 2 equation).
+    c.   It is only a small step, then, to imagine a situation in which there was variation at the group level, in the *response* to a predictor. E.g., the regression coefficient or effect for SES could be different *depending on the school*.  
+        i.   This could be important for documenting variation in policy: a school in which the effect of SES was positive (on math scores) is different from another school in which the effect of SES was negative.  
+            1.   Note: even if the 'fixed effect' for SES is non-significant, there could be significant variation in the return to SES across grouping factors (e.g., schools)[^1].
+            2.   Some researchers like to conceptualize random slopes as interactions between group and predictor. They are, but *we do not estimate every interaction, only their distribution*.  
+   d. Do we have any evidence of this in our school data?  
+      1. We first take a graphical approach to variation in coefficients – compute 'mini regressions,' so that slopes may vary by school (this is like including all interactions). We'll now look at __MATHGAIN__ vs. SES, in the first 12 schools):  
+    ```{r, include=showR, echo=showR}
+    dat <- read.csv("../Datasets/classroom.csv")
+    if (vanillaR) {
+        print(xyplot(mathgain~ses|schoolid,data=dat[dat$schoolid<13,],type=list('p','r')))
+    } else {
+        ggplot(data=subset(dat,schoolid<13),aes(y=mathgain,x=ses))+geom_point()+facet_wrap(~schoolid,nrow = 3) + geom_smooth(method = "lm", se = FALSE,col=2) 
+    }
+    ```
+    c. (cont.) 
+        ii. (cont.)
+            1. We see a little variation in the slopes.
+            2. We don't have a good way to assess the 'significance' of that variation, graphically. We are building up to this ability.
+        iii. Note: This graphic is NOT helping us to fully assess the larger question, which is, "net of the fixed effects for SES & MATHKNOW and the random effects for schools and classrooms, is there remaining variation in the 'return' to (effect of; response surface for) SES?" 
+        iv. We address that question here (by including SES and MATHKNOW in our model).
+            1. We use an estimate of within-group residual error that we have not described yet (we will soon), but for now, accept it as a residual that can 'net out' the fixed *and* random (group) effects.
+            2. The formula for this type of residual may be helpful to see ("hats" indicate estimates):
+$$
+\hat{\varepsilon}_{ijk} = MATHGAIN_{ijk} - \{(\hat{b}_0 + \hat\eta_{jk} + \hat \zeta_k) + \hat b_1 SES_{ijk} + \hat b_2 MATHKNOW_{jk}\}, 
+$$
+
+    ```{r resid1, include=showR, echo=showR}
+    #look at residuals:
+    fit1 <- lmer(mathgain~ses+mathknow+(1|schoolid/classid),data=dat)
+    #get the right sample:
+    save.options <- options()
+    options(na.action='na.pass')
+    mm <- model.matrix(~mathgain+ses+mathknow,data=dat)
+    options(save.options)
+    in_sample <- apply(is.na(mm),1,sum)==0
+    dat$res1 <- rep(NA,dim(dat)[1]) #fill with correct number of missings
+    dat$res1[in_sample] <- residuals(fit1)
+    if (vanillaR) {
+         print(xyplot(res1~ses|schoolid,data=dat[dat$schoolid<13,],type=list('p','r')))
+    } else {
+         ggplot(data=subset(dat,schoolid<13),aes(y=res1,x=ses))+geom_point()+facet_wrap(~schoolid,nrow = 3)+ geom_smooth(method = "lm", se = FALSE,col=2) 
+    }
+    ```
+    c. (cont.) 
+        iv. (cont.)
+            3. Each facet (small plot) is a school; there should be no remaining relationship to SES in these residuals, right? But based on the residuals, there are likely some differences in SES slope, by school.
+        v. We do the same comparison of residuals vs. MATHKNOW:
+    ```{r resid2, include=showR, echo=showR}
+        if (vanillaR) {
+             print(xyplot(res1~mathknow|schoolid,data=dat[dat$schoolid<13,],type=list('p','r')))
+        } else {
+             ggplot(data=subset(dat,schoolid<13),aes(y=res1,x=mathknow))+geom_point()+facet_wrap(~schoolid,nrow = 3)+ geom_smooth(method = "lm", se = FALSE,col=2) 
+        }
+    ```
+    c.  (cont.)
+        v. (cont.)
+            1. There is some variation in MATHKNOW slope, as assessed using residuals, but the slopes are missing in many schools.
+            2. Here, we face a different problem of little variation in MATHKNOW. This occurs whenever there are only a few classrooms in a school (or when all teachers in the school have the same MATHKNOW). *Can you identify which schools have only one classroom sampled in this graphic (hint: can't fit a regression line)?*
+    d. One way to include variation in the returns to a predictor formally in a model uses the *random coefficients* formulation:  
+        i. We'll do this first for variation in returns to SES at the school level:  
+$$
+MATHGAIN_{ijk} = \beta_{0jk} + \beta_{1k}SES_{ijk} + b_2 MATHKNOW_{jk} + \varepsilon_{ijk}
+$$
+$$
+\beta_{0jk} = b_0 + \eta_{0jk} + \zeta_{0k},\ \beta_{1k} = b_1 + \zeta_{1k}
+$$
+$$
+\varepsilon_{ijk}\sim N(0,\sigma_\varepsilon ^2),\ \eta_{0jk}\sim N(0,\sigma_{\eta_0}^2),\ \zeta_{0k}\sim N(0,\sigma_{\zeta_0}^2),\  \zeta_{1k}\sim N(0,\sigma_{\zeta_1}^2)\mbox{ indep.}
+$$
+            1. Note that we had to add some subscripts to differentiate the random effects associated with the constant from those associated with SES.
+            2. Note as well that this notation is a bit harder to extend. For example, how would we add classroom-level random slopes for SES? 
+        ii.  If the 'returns' to SES vary by classroom (*j*) within school (*k*), we need to change the index on the beta coefficient in front of SES to use the index '*jk'*:
+$$
+MATHGAIN_{ijk} = \beta_{0jk} + \beta_{1jk}SES_{ijk} + b_2 MATHKNOW_{jk} + \varepsilon_{ijk},
+$$
+$$
+\mbox{ with }\beta_{0jk} = b_0 + \eta_{0jk} + \zeta_{0k};\  \beta_{1jk} = b_1 + \eta_{1jk} + \zeta_{1k}
+$$
+$$
+\varepsilon_{ijk}\sim N(0,\sigma_\varepsilon ^2),\ \eta_{0jk}\sim N(0,\sigma_{\eta_0}^2),\ \eta_{1jk}\sim N(0,\sigma_{\eta_1}^2),\ \zeta_{0k}\sim N(0,\sigma_{\zeta_0}^2),\ \zeta_{1jk}\sim N(0,\sigma_{\zeta_1}^2) \mbox{ indep.}
+$$
+            2. We use the subscripts 0 and 1 to 'link' the effect to the coefficient it modifies – e.g., '0' refers to $\beta_0$ and '1' refers to $\beta_1$.
+        iii.  To see how the return to the predictor varies, it is useful to rearrange the components of the random coefficients in different ways. 
+            1. For our last example: 
+$$
+MATHGAIN_{ijk} = \beta_{0jk} + \beta_{1jk}SES_{ijk} + b_2 MATHKNOW_{jk} + \varepsilon_{ijk},
+$$
+$$
+\mbox{with }\beta_{0jk} = b_0 + \eta_{0jk} + \zeta_{0k};\ \beta_{1jk} = b_1 + \eta_{1jk} + \zeta_{1k}
+$$
+            2. This could also be written: 
+$$
+MATHGAIN_{ijk} = (b_0 + \eta_{0jk} + \zeta_{0k}) + (b_1 + \eta_{1jk} + \zeta_{1k})SES_{ijk} + b_2 MATHKNOW_{jk} + \varepsilon_{ijk}
+$$
+            3. It is often useful to separate out the fixed and random effects: 
+$$
+MATHGAIN_{ijk} = b_0 + b_1 SES_{ijk} + b_2 MATHKNOW_{jk} + \eta_{0jk} + \eta_{1jk}SES_{ijk} + \zeta_{0k} + \zeta_{1k}SES_{ijk} + \varepsilon_{ijk}
+$$
+            4. We might rearrange the ordering of the random effects to better reflect the nesting: 
+$$
+MATHGAIN_{ijk} = b_0 + b_1 SES_{ijk} + b_2 MATHKNOW_{jk} + \zeta_{0k} + \zeta_{1k}SES_{ijk} + \eta_{0jk} + \eta_{1jk}SES_{ijk} + \varepsilon_{ijk}
+$$
+                + This is the way the model is 'described' in most statistical software packages: as a set of 'regression-like' fixed effects followed by 'regression-like' random effects, in the order of nesting. 
+                + The challenge with the random effects is that they vary by group, and thus the SYNTAX is a bit different.
+                + We can add predictors to the random effects specification as follows: instead of random intercept, `+(1|schoolid)`, a random slope, in SES, would be specified as `+(ses||schoolid)`.  In this last bit of notation, the random intercept is included by default, and the effects are assumed uncorrelated (see __lmer_useful_guide.pdf__ in Readings).
+                + It is more complicated if different predictor effects vary by different grouping structures.  In `lmer` one can sometimes specify these as crossed effects, but this must be done with care by adjusting identifiers to reflect nesting.
+         iv. (Simpler) Example I: random return to SES by school, controlling for MATHKNOW as well (and with school and classroom effects), with model:
+$$         
+MATHGAIN_{ijk} = b_0 + b_1 SES_{ijk} + b_2 MATHKNOW_{jk} + \eta_{0jk} + \zeta_{0k} + \zeta_{1k} SES_{ijk} + \varepsilon_{ijk}
+$$
+$$
+\mbox{ with }\eta_{0jk}\sim N(0,\sigma_{\eta_0}^2),\ \zeta_{0k}\sim N(0,\sigma_{\zeta_0}^2),\  \zeta_{1k}\sim N(0,\sigma_{\zeta_1}^2), \varepsilon_{ijk}\sim N(0,\sigma_\varepsilon ^2),\mbox{ indep.}
+$$
+
+    ```{r fit34, include=showR, echo=showR}
+    #first without random slopes
+    fit3 <- lmer(mathgain~ses+mathknow+(1|schoolid/classid),data=dat)
+    print(summary(fit3))
+    #now with them
+    fit4 <- lmer(mathgain~ses+mathknow+(0+ses|schoolid)+(1|schoolid)+(1|classid),data=dat) #the repeat of the schoolid with a 0+ dropping the constant makes slope and intercept indep. Strictly speaking the effects are given as crossed here.
+    print(summary(fit4))
+    ```
+    c. (cont.)
+        iv. (cont.) 
+            1. The extremely small value for the estimate of $\sigma_{{\zeta_1}}^2$, in the random-effects portion of the output suggests that we do not have systematic variation in returns to SES at the school level.
+            2. The definitive test is an LRT:  
+    ```{r lrt34, include=showR, echo=showR}
+    #lrtest M3 M4
+    anova(fit3,fit4,refit=F)
+    ```
+    c. (cont.)
+        iv. (cont.)
+            3. We do not identify significant variation in the SES effect over schools (p=1.0)     
+                + It would most likely only be 'worse' if we tried to detect variation in SES effects at the classroom level, as these are even smaller units of analysis. 
+        v. Example II: *Random return to MATHKNOW* by school controlling for SES as well (and with school and classroom effects), with model:
+$$
+MATHGAIN_{ijk} = b_0 + b_1 SES_{ijk} + b_2 MATHKNOW_{jk} + \eta_{0jk} + \zeta_{0k} + \zeta_{2k} MATHKNOW_{jk} + \varepsilon_{ijk};
+$$
+$$
+\eta_{0jk}\sim N(0,\sigma_{\eta_0}^2),\ \zeta_{0k}\sim N(0,\sigma_{\zeta_0}^2),\ \zeta_{2k} \sim N(0,\sigma_{\zeta_2}^2),\ \varepsilon_{ijk}\sim N(0,\sigma_\varepsilon ^2),\mbox{ indep.}
+$$
+            1. Notice, we use $\zeta_{2k}$ to refer to the MATHKNOW effect. 
+    ```{r fit45, include=showR, echo=showR}
+    fit5 <- lmer(mathgain~ses+mathknow+(0+mathknow|schoolid)+(1|schoolid)+(1|classid),data=dat)
+print(summary(fit5))
+    ```
+    c. (cont.)
+        v. (cont.)
+            2. The extremely small value for the estimate of $\sigma_{\zeta_2}^2$, noted under `mathknow` in the random-effects portion of the output, suggests that we do not have systematic variation in returns to MATHKNOW at the school level. 
+            3. The definitive test is again an LRT:
+    ```{r lrt35, include=showR, echo=showR}
+    #lrtest M3 M5
+    anova(fit3,fit5,refit=F)
+    ```
+    c. (cont.)
+        vi.  Example III: We add MATHKIND as a control in the fixed effects. Then we *revisit* random returns to SES by school controlling for MATHKIND and MATHKNOW (and with school and classroom effects), with model: 
+        $MATHGAI{N_{ijk}} = {b_0} + {b_1}SE{S_{ijk}} + {b_2}MATHKNO{W_{jk}} + {b_3}MATHKIN{D_{ijk}} + {\eta_{0jk}} + {\zeta_{0k}} + {\zeta_{1k}}SE{S_{ijk}} + {\varepsilon_{ijk}}$,
+with $\eta_{0jk}\sim N(0,\sigma_{\eta_0}^2)$, $\zeta_{0k}\sim N(0,\sigma_{\zeta_0}^2)$, ${\zeta_{1k}} \sim N(0,\sigma_{\zeta_1^{}}^2)$, and ${\varepsilon_{ijk}} \sim N(0,\sigma_\varepsilon ^2)$, all independent of one another.    
+            1. We return to using $\zeta_{1k}$ to refer to the SES effect.  
+            2. We also refit a random intercept model (in schools and classrooms, for subsequent use in the LRT) so that we have a baseline model with the full set of fixed effects. Then, we add random returns to SES.
+    ```{r 2effs1, include=showR, echo=showR}
+    #model without random slopes
+    fit6 <- lmer(mathgain~mathkind+ses+mathknow+(1|schoolid)+(1|classid),data=dat)
+    print(summary(fit6))
+    #model with random slopes
+    fit7 <- lmer(mathgain~mathkind+ses+mathknow+(0+ses|schoolid)+(1|schoolid)+(1|classid),data=dat)
+    print(summary(fit7))
+    ```
+    c. (cont.)
+        vi. (cont.)
+            3. The value for the estimate of $\sigma_{\zeta_1}^2$, noted in the row labeled `ses` in the random-effects portion of the output suggests that MAYBE we do have systematic variation in returns to SES at the school level. 
+            4. The definitive test is again an LRT: 
+    ```{r lrt2, include=showR, echo=showR}
+    anova(fit6,fit7,refit=F)
+    ```
+    c. (cont.)  
+        vi. (cont.)
+            5. This suggests that we still cannot identify significant variation in the return to SES (under this additional set of controls).  
+5. Correlated level and slope
+    a. Until now, we have assumed that every effect is independent of the other, but this could be greatly oversimplifying the situation. 
+        i. E.g., in schools with very large school effects (intercepts), maybe the returns to SES are muted, whereas in schools with very negative school effects (intercepts), the returns to SES are quite substantial.
+    b. We can directly model this correlation by introducing a new 'variance component' – the correlation between two effects.
+    c. Begin with our model that includes MATHKIND as a control with outcome MATHGAIN:
+$$
+MATHGAIN_{ijk} = b_0 + b_1 SES_{ijk} + b_2 MATHKNOW_{jk} + b_3 MATHKIND_{ijk} + \eta_{0jk} + \zeta_{0k} + \zeta_{1k}SES_{ijk} + \varepsilon_{ijk}
+$$
+$$
+\eta_{0jk}\sim N(0,\sigma_{\eta_0}^2),\ \zeta_{0k}\sim N(0,\sigma_{\zeta_0}^2),\  \zeta_{1k}\sim N(0,\sigma_{\zeta_1}^2),\ \varepsilon_{ijk}\sim N(0,\sigma_\varepsilon^2), 
+$$
+BUT NOW $corr(\zeta_{0k},\zeta_{1k}) = \rho_{\zeta_0\zeta_1}$, which may not be zero, and all other pairs of random terms are independent of one another.
+        i.   We can use LRTs to determine whether we need a correlation term, but instead, given that we didn't even 'need' a variable return to SES, we test whether adding a correlation between level and slope for SES (by school) improves the model to the point of significance.
+        ii.  Correlation is the default in R lmer models, so we simply need to condense the schoolid random effects to `+(ses|schoolid)` rather than use the two terms `+(1|schoolid)+(0+ses|schoolid)`as before.  
+    ```{r 2effs2, include=showR, echo=showR}
+    fit8 <- lmer(mathgain~mathkind+ses+mathknow+(ses|schoolid)+(1|classid),data=dat)
+    print(summary(fit8))
+    # If you wanted to see CIs for the var comps, it takes this slightly slow call and computation:x
+    # CIs <- confint(fit8)
+    # print(CIs[1:5,],digits=4) # these are the var comps in s.d. terms
+    anova(fit6,fit8,refit=F)
+    ```
+    c. (cont.)  
+        iii. The value for the estimate of $\sigma_{\zeta_1}^2$, noted in the line with `ses` is about the same in this model.
+        iv. The estimate of $corr({\zeta_{0k}},{\zeta_{1k}}) = {\rho_{{\zeta_0}{\zeta_1}}}$, `r round(attr(VarCorr(fit8)[[2]],"correlation")[1,2],2)`, is to the right of the estimates for the intercept and slope random effects.
+            1. Confidence intervals can be generated with a separate command (`confint` in `lme4` package; yields them in terms of s.d. units -- commented out), but CIs for *variance* terms are so controversial as to never be reported by some researchers. 
+            2. CIs are useful for correlations because they may be positive or negative.  However, for this model, we commented out the calls and suppressed the output due to speed and readability considerations. If you run it, those listed as .sig03 and .sig04 are associated with the `ses` term, and suggest no information about it (-1 or +1 correlations are problematic - a red flag).  The warnings that would fill a page suggest this is a poorly specified model.
+        v. The LRT, still 'rejects' the need for the 2 new parameters in this model, compared to a simpler, level-effects (intercepts) only version.
+            1. CONCLUSION: we tried pretty hard to identify varying returns to a predictor, but could not do so. We may be more successful with other data and models.
+
+## Sampling variance & Wald tests; random slopes (redux)
+1. There is an important distinction between sampling variation of parameter estimates and variation between groups (random effects). We build intuition for this through the derivation of a Wald test.
+    a. Say we have two nested models, M1 with fixed effect parameters $({b_0},{b_1},{b_2})$ and M2 with fixed effect parameters $({b_0},{b_1},{b_2},{b_3},{b_4},{b_5})$, and we wish to determine whether the new parameters $({b_3},{b_4},{b_5})$ are significant as a block.
+        i. NOTE: we can this with a LRT. But we learn something important by examining an alternative approach.
+    b. A test of $H_0: {b_3} = {b_4} = {b_5} = 0$ is more complicated than a z-test, which is one-dimensional. The following generalization of a z-test to more than one parameter is called a *Wald test*.
+        i. We now describe a concrete example in which we are faced with this inferential problem: Using the classroom data and MATHGAIN outcome, we fit a model with random classroom and school effects, along with two subject-level (SES and MINORITY) and three classroom-level (MATHKNOW, MATHPREP and YEARSTEA) predictors. The goal is to evaluate whether the *classroom-level* predictors are significant, as a block. Here is the R code for the full model:  
+    ```{r wald1, include=showR, echo=showR}
+    save.options <- options()
+options(na.action='na.pass')
+mm <- model.matrix(~mathgain+ses+mathknow,data=dat)
+options(save.options)
+in_sample <- apply(is.na(mm),1,sum)==0
+    fit1 <- lmer(mathgain~ses+minority+mathknow+mathprep+yearstea+(1|schoolid)+(1|classid),data=dat)
+print(summary(fit1))
+    ```
+    b. (cont.)
+        ii. We begin by REVIEWING the evaluation of whether *one* of the predictors is significant. *How is this done*? 
+        iii. When we fit a model, we get a set of parameter estimates and *standard errors* for each.  
+            1. Standard error is an estimate of the variability of the parameter estimate. If we were to gather similar data from this population, we would expect the fixed effect parameter estimates to vary from sample to sample.  
+            2. Here is some R code that simulates 100 simple linear regressions in which the beta is known to be 1, but varies in any particular sample (we generate samples from a known population mechanism):   
+    ```{r sim1, include=showR, echo=showR}
+set.seed(0)
+N<-100
+x <- vector("list",N)
+y <- vector("list",N)
+set.seed(1)
+beta <- rep(NA,N)
+for (i in 1:100) {
+    x[[i]] <- rnorm(N)
+    y[[i]] <- 1*x[[i]] + rnorm(N)
+    beta[i] <- lsfit(x[[i]],y[[i]])$coef[2]
+}
+    ```
+    b. (cont.)
+        ii. (cont.)
+            3. We reproduce the (edited) results from fitting the first two regressions here: 
+    ```{r smry1, include=showR, echo=showR}
+    summary(lm1 <- lm(y[[1]]~x[[1]]))
+    summary(lm2 <- lm(y[[2]]~x[[2]]))
+    ```
+    b. (cont.)
+        ii. (cont.)
+            4. The estimate of beta associated with X is `r round(summary(lm1)$coef[2,1],3)` and its standard error is estimated to be `r round(summary(lm1)$coef[2,2],3)`.  We wrote our simulation so that (population) beta is 1; it was estimated to be nearly the same in this sample. 
+            5. The results of the second run from simulated data are similar, but not identical. Note how the estimate of beta for the X is now `r round(summary(lm2)$coef[2,1],3)`, and the std. err. is estimated to be `r round(summary(lm2)$coef[2,2],3)`. *The values change from sample to sample.*
+            6. We repeated this exercise 100 times, and can evaluate the std. dev. of the 100 betas for X estimated from the samples. The observed std. dev. of those 100 betas is an estimate of the std. err.[^2].  We get the value `r round(sd(beta),3)` in our simulations.  Theory would give the value 0.10, based on our DGP and sample size.
+            7. We have an estimate of the std. err. of the estimate of the beta for X, based on our simulations, but this is slightly different from the s.e. that is derived from the 'output' in our first two simulations (we have to rely on theory to know the distribution in a real problem with one sample).  Thus, std. err. computations in standard regression are based on MLE (asymptotic) theory.[^3]  We have been exploring the same concept empirically via simulations.
+            8. Here is the density plot depicting the sampling distribution of the beta for X, based on the simulation:   
+    ```{r sampDist1, include=showR, echo=showR}
+    plot(density(beta))
+    ```
+    c. We now revisit our example, with the simple goal of first evaluating the significance of MATHPREP, and then the significance of a block of classroom-level predictors (recall the results):  
+    ```{r, include=showR, echo=showR}
+   print(summary(fit1)) 
+    ```
+    c. (cont.)
+        i. The std. err. for MATHPREP is `r round(summary(fit1)$coef[5,2],3)`. Given a parameter estimate $\hat{b}_4$ of `r round(summary(fit1)$coef[5,1],3)`, the t-test has value `r round(summary(fit1)$coef[5,4],3)` and corresponding (two-sided) p-value `r round(summary(fit1)$coef[5,5],3)`. *The key question is where did we get the s.e. and p-value?*  
+            1. The null is $H_0: b_4=0$ (MATHPREP is the $4^{th}$ predictor in our list), and the test statistic based on this is $z = \frac{\hat b_4 - 0}{\mbox{s.e.}(\hat b_4)}$ (this can be thought of as 'standardizing' the estimate). Reminder: we put 'hats' on the parameters because they are estimated from the data under the model. 
+            2. Now the value for t=`r round(summary(fit1)$coef[5,4],3)` (the test statistic) comes directly from the formula: (2.38-0)/1.32.
+            3. Our theory for MLEs tells us that under $H_0$, $t \sim N(0,1)$ (t is distributed *approximately* as a standard normal, at least in large samples (this is what is meant by *asymptotically*).
+            4. Then $\Pr (\left| z \right| > 1.80) = 0.07$.
+        ii.  REMINDER: Our regression parameter 2.38 is the population-level effect of MATHPREP on any individual, no matter what classroom or school (these other effects have been 'netted out').  
+            1. The std. err. of a regression parameter (1.32 in this case) describes the uncertainty in that *estimate*.[^4] 
+            2.   Variation in this parameter occurs through sampling variability: in different samples, we might estimate a different 'effect' for MATHPREP. Here is the idealized distribution of parameter estimates we would expect for MATHPREP in data from the same population (this is simply a normal distribution centered at the estimated value, with std. dev. equal to the estimated std. err.):  
+                + This is the theoretical distribution of the single fixed effect parameter estimate (normal, mean 2.38, std.dev. 1.32 –*why do I write std.dev., not std.err.?*).
+            3. This type of variation is *distinctly different* from that reflected in variance components: the variance of the random effect. The latter describes variation from group to group in a latent variable. *We need to be clear on this distinction.* 
+    ```{r dist2, include=showR, echo=showR}
+    #sampling distns
+    plot(density(rnorm(100000,mean=2.38,sd=1.32)),main="Sampling distribution of MATHPREP parameter")
+    abline(v=2.38,col=3)
+    ```
+    d.   How can we possibly evaluate the null $H_0: {b_3} = {b_4} = {b_5} = 0$ (other than using an LRT)?  
+        i. The approach that we use in fitting MLMs, *maximum likelihood estimation*, provides us with theory-based estimates of the std. err. of each parameter estimate, but it tells us something more as well.  
+        ii. If we look at two parameter estimates simultaneously, we begin to see that there is more information about the uncertainty. Start with $\hat b_3$ and $\hat b_4$. Under theory for MLEs, we have expressions for: $\mbox{s.e.}(\hat b_3)$,  $\mbox{s.e.}(\hat b_4)$ *and* $corr({\hat b_3},{\hat b_4})$. We will use the correlation in the assessment of a multivariate null hypothesis.  
+        iii. We have a way to express all of these relationships in a covariance matrix, which is a fancy form of a correlation table (scaled by variances). In our example, with three parameters, theory tells us that $({\hat b_3},{\hat b_4},{\hat b_5})' \sim N(({b_3},{b_4},{b_5})',\Sigma )$, with 
+  $$\Sigma  = \left( {\begin{array}{*{20}{c}}
+{\sigma_3^2}&{{\sigma_3}{\sigma_4}{\rho_{34}}}&{{\sigma_3}{\sigma_5}{\rho_{35}}}\\
+{{\sigma_3}{\sigma_4}{\rho_{34}}}&{\sigma_4^2}&{{\sigma_4}{\sigma_5}{\rho_{45}}}\\
+{{\sigma_3}{\sigma_5}{\rho_{35}}}&{{\sigma_4}{\sigma_5}{\rho_{45}}}&{\sigma_5^2}
+\end{array}} \right)$$
+where we use the 'hat' symbol for the estimates. Without a 'hat', the parameters are taken to be the 'true' values.  
+        iv.  Under $H_0: {b_3} = {b_4} = {b_5} = 0$, $({b_3},{b_4},{b_5}){\Sigma ^{ - 1}}({b_3},{b_4},{b_5})' \sim \chi_3^2$. The expression is just a (complicated) weighted average of all of the terms in ${\Sigma ^{ - 1}}$.  
+            1. ${\Sigma ^{ - 1}}$  is $\Sigma$'s matrix inverse. It's the reciprocal if the matrix has one element.[^5]
+            2. Believe it or not, when we are testing a single parameter, we are using this formula, only we don't "square" the left hand side (chi-sq is a squared standard normal). 
+            3. To construct this test manually is a bit of work, but we do it below.  R libraries tend to rely on LRTs and this requires that the models to be rerun using ML not REML (if we use the anova command).  To get around this, we have to rely on some functions in other libraries (similar to using the `ranova` function from lmerTest for tests of random effects).  The library with a generic Wald test built in is known as `car` and the function `linearHypothesis`.
+        v. Fortunately, an estimate of $\Sigma$ is readily available as part of the estimation procedure in most packages. 
+    ```{r, include=showR, echo=showR}
+    V <- summary(fit1)$vcov  # this var-cov matrix is a bit smaller than what STATA gives (and in slightly different order)
+    print(V)
+    ```
+    d. (cont.)
+        vi. Estimates of the squared std. err. of each parameter estimate are given by the diagonal terms. E.g., `r round(V[5,5],4)` is the squared version of the s.e. for MATHPREP.[^6] 
+        vii. We now separate out the variances and covariances associated with the three classroom-level effects only, and then manually compute the Wald statistic described above, followed by an easier way.
+    ```{r, include=showR, echo=showR}
+    V3 <- V[4:6,4:6]
+    print(V3)
+    B3 <- fit1@beta[4:6]
+    #show the inverse, for completeness
+    cat('\nThis is the inverse:\n\n')
+    solve(V3)
+    cat('\n')
+    W <- t(B3)%*%solve(V3)%*%B3
+    print(W)
+    cat('\nEasier Wald test:\n')
+    require(car)
+    linearHypothesis(fit1,c("mathknow","mathprep","yearstea"))
+    ```
+     d. (cont.)
+        viii. To be clear, the matrix
+$$
+\hat \Sigma  = \left( {\begin{array}{*{20}{c}}
+{1.738}&{.005}&{.002}\\
+{.005}&{1.744}&{ - .030}\\
+{.002}&{ - .030}&{.018}
+\end{array}} \right)
+$$
+(we put a hat on because it is estimated from the data) reflects our *simultaneous* uncertainty about three parameters, $(\hat b_3,\hat b_4,\hat b_5)'$.  
+            1. Their distribution (in repeated samples from data from this population) is multivariate normal, centered at the estimates, $({\hat b_3},{\hat b_4},{\hat b_5})'$. Below is a simulation of the estimates you can expect from similar samples:
+    ```{r, include=showR, echo=showR}
+    #mv plots
+    betas <- rmvnorm(1000,fixef(fit1)[4:6],sigma=as.matrix(V3))
+    scatterplot3d(betas,highlight.3d=T,pch=16,xlab='b3',ylab='b4',zlab='b5',cex.symbols=1)
+    # interactive plot surpressed: 
+    # code if wanted: 
+    # plot3d(betas, type = "s", size=1)
+    ```
+    d. (cont.)
+        viii. (cont.)
+            2. Most estimates are expected to lie near the center, which is the MLE. To the extent that some estimates deviate from that center, *they move together, as a group of three*, in a manner governed by this multivariate normal distribution.
+    e. Uncertainty in $b_4$ (the MATHPREP coefficient) is very different from the variance in a random slope term centered on $b_4$.
+        i. Uncertainty in $b_4$ *comes from sampling variation*, not differences between groups. For any given dataset, we have one estimate of $b_4$ and we expect that it will vary from sample to sample. 
+            1. A large std. err. around a regression parameter may lead to us declaring it non-significant, which is another way of saying that it was likely a 'fluke' – signs may shift, etc., so we had better not 'believe' it too much. 
+        ii. A random slope associated with MATHPREP *varies from group to group*; this is different from sampling variation. Let's look a little more closely at a model with variation across groups in slope terms:
+$$
+MATHGAIN_{ijk} = b_0 + b_1 SES_{ijk} + b_2 MINORITY_{ijk} + b_3 MATHKNOW_{jk} + b_4 MATHPREP_{jk}
+$$
+$$
++{b_5}YEARSTEA_{jk} + \eta_{0jk} + \zeta_{0k} + \zeta_{4k} MATHPREP_{jk} +\varepsilon_{ijk}
+$$
+$$
+\eta_{0jk}\sim N(0,\sigma_{\eta_0}^2),\ \zeta_{0k}\sim N(0,\sigma_{\zeta_0}^2),\ \zeta_{4k}\sim N(0,\sigma_{\zeta_4}^2),\ \varepsilon_{ijk}\sim N(0,\sigma_\varepsilon^2) \mbox{ indep.}
+$$
+        iii. The variance component $\sigma_{\zeta_4}^2$is not a (squared) std. error. It is part of a multi-level model, specifying how much between school-variation can be attributed to different returns to MATHPREP.  
+             1. For school *k*, we predict that the return to MATHPREP is ${\hat b_4} + {\zeta_{4k}}$, not simply $\hat b_4$, and this sum varies from school to school.
+             2. When $\hat \sigma_{{\zeta_4}}^2$ is large, $\zeta_{4k}$ will take on a large range of values.
+             3. Say $\hat \sigma_{{\zeta_4}}^2=4$. Then *ignoring sampling variation*, and looking at *between-school variation*, ${\hat b_4} + {\zeta_{4k}} \sim N({\hat b_4},{2^2})$, so we would expect 68% of the *effect of* MATHPREP (its combined fixed+random coefficient) to lie within one s.d. of the mean, or between ${\hat b_4} - 2$ and ${\hat b_4} + 2$.
+             4. These are different returns to MATHPREP ***in different schools***, just like we have different mean levels (intercept differences) for different schools.
+             5. $\hat b_4$ is about 2.3. If $\hat \sigma_{{\zeta_4}}^2=4$, then we would expect the relationship between MATHGAIN and MATHPREP to vary, *by school*, in a manner depicted by this graphic:  
+    ```{r, include=showR, echo=showR}
+beta4 <- rnorm(100,mean=2.3,sd=2)
+mathprep <-seq(1,6,length=100)-2.6
+plot(2.6+mathprep,2.3*mathprep,col=1,type='l', lwd=2, ylab='mathgain',xlab='mathprep')
+for (i in 1:100) lines(2.6+mathprep,beta4[i]*mathprep,col=rainbow(21)[1+i%%21])
+    ```
+    e. (cont.)
+        iii. (cont.)
+            6. All of the colors represent different *schools*, so these are varying returns to MATHPREP (we centered things so that all lines pass though the point ($\overline{MATHPREP}$,0).
+        iv. This example was exaggerated slightly (and idealized) to make a point about the impact of $\hat \sigma_{{\zeta_4}}^2$. The actual model fit shows a slightly smaller random return to MATHPREP:
+    ```{r, include=showR, echo=showR}
+    fit2 <- lmer(mathgain~ses+minority+mathknow+mathprep+yearstea+(0+mathprep|schoolid)+(1|schoolid)+(1|classid),data=dat)
+anova(fit1,fit2,refit=F)
+    ```
+    e. (cont.)
+        iv. (cont.)
+            1. But the LRT suggests that this is not significant; that's why we're saying it was 'idealized' (useful for expository purposes only). 
+            
+[^1]: Taking this a bit further, if we are interested in group-level effects ("returns" to predictors), then failure to allow these "interactions" (see above) between group and predictor will lead us to believe that no effect exists, when instead it simply varies across groups -- known as treatment heterogeneity in the causal inference domain. Use of random slopes allows the researcher to identify this important situation.
+
+[^2]: Note in R, we use the object named 'beta' to hold the results of 100 regressions on simulated samples in one named vector, so sd(beta) evaluates the empirical, or observed s.d. of the set of parameters estimated across simulations.
+
+[^3]: That theory is that the MLE (for a particular beta, or a vector of parameters) is asymptotically normal (univariate or multivariate, depending), with mean equal to the true parameter(s) and variance given by a slightly complicated formula involving matrix products and inverses. All of this assumes the model and its assumptions are correct. In the simple linear regression of our example, the formula reduces to 
+    $$
+    s.e.({\hat \beta_1}) = \hat \sigma /(\sqrt n  \cdot sd({x_1}))
+    $$
+    where $\hat \sigma$ is the r.s.e. or error s.d. All terms other than n=100 are 1, so the asymptotic s.e. of the beta for x is 1/10 in the simulated example.
+
+[^4]: The **standard error** is the standard deviation of the *sampling distribution* of a *statistic* (such as a mean or regression coefficient)
+
+[^5]: For those familiar with matrix notation, in linear regression, if
+    $Y = X\beta  + \varepsilon ;\;\varepsilon \sim N(0,\sigma_\varepsilon ^2)$, then $\Sigma  = {(X'X)^{ - 1}}\sigma_\varepsilon ^2$, and recall that the columns of *X* are known – they are a column of ones for the constant followed by a separate column for each of the predictors.
+
+[^6]: The covariances are in the off-diagonal terms and represent
+dependency between parameter estimates (from sample to sample).
