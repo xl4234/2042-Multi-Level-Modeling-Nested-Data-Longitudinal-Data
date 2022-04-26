@@ -1,0 +1,395 @@
+---
+title: "MLM Nested Handout 6 (Spring 2022)"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r initialize, include=FALSE}
+  # make sure dir struct is like: "~/Dropbox/Teaching/MLM Nested_Sp22/Handouts"
+    library(lattice)
+    library(ggplot2)
+    #set "vanillaR" flag for use of ggplot or not (when implemented)
+    vanillaR <- F
+    showR <- T
+```
+
+# Centering; ecological fallacy; hybrid model; FE v. RE
+1.  Centering
+    a. Grand mean: In MLMs, centering on a grand mean is not that different than what is commonly done in regression. You simply shift the "zero" or origin of the predictor. 
+        i. This shifts the 'reference group' to the average of any predictor you have grand mean centered, which could be useful.
+            1. This is more useful as an anchor than you might imagine.  E.g., when you wish to compare the constant across nested models, the reference group never changes.
+        ii. Centering can reduce multicollinearity that is common among interactions, especially squared and higher order polynomial terms.
+    b. Group-mean centering, however, has the potential to change all of your estimates. 
+        i. Group-mean centering entails computing the mean for a predictor separately for each group and then subtracting out those group-specific means before entering that predictor in the model. 
+        ii. They become *relative* effects: what does a one unit change *from my group average* lead to in terms of the outcome, net of all else? 
+        iii. The two effects are potentially quite different, as will become immediately apparent from our simulated data. We generate our data using this 'model':
+$$
+{y_{ij}} = 1 \cdot {x_{ij}} + {\eta_j} + {\varepsilon_{ij}}
+$$
+$$
+{x_{ij}} = j + {\upsilon_{ij}}
+$$
+$$
+\mbox{with }{\eta_j} = 1.1 \cdot (31 - j),\ j = 1 \ldots 30
+$$
+$$
+\varepsilon_{ij}\sim N(0,{0.5^2}),\ {\upsilon_{ij}} \sim N(0,{1^2}) \mbox{ indep.}
+$$
+This implies that group 1 has an effect ($\eta$) of 1.1x30; group 2 has an effect of 1.1x29; …; group 30 has an effect of 1.1x1.  
+            1. By assigning group effects that are decreasing as group number (and 'x') increases, we generate two 'conflicting' relationships (within vs. between).
+        iv. Below, we plot outcome 'y' by predictor 'x', when the data are grouped (by color), which reveals the difference between the two effects:  
+    ```{r , include=showR, echo=showR}
+require(foreign)
+require(nlme)
+set.seed(2042)
+M <- 10 # obs per group
+K <- 30 # groups
+id <- rep(1:K,rep(M,K))
+x <- rnorm(M*K)+ id
+m <- 1.1
+y <- 1*x + rnorm(M*K,sd=.5) + rep(seq(m*K,m,-m),each=M)
+#this more 'normal' eta leads to LMEs doing 'better'
+#y <- 1*x + rnorm(M*K,sd=.5) + 1.5*rep(m*K*(1.96+qnorm(seq(.975,0.025,length=K)))/3.92,each=M)
+if (vanillaR) {
+  plot(x,y,col=rainbow(K)[id])
+} else {
+  ggplot(data=NULL,aes(x=x,y=y,col=id)) + geom_point() + scale_color_gradientn(colours = rainbow(K))
+}
+    ```  
+    b. (cont.)
+       v. Can you see the 'conflict'? Within group, there is a positive relationship, and between, there is a negative one. 
+          1.  This is an example of the *ecological fallacy*: the relationship in the aggregate differs from the relationship at the individual level.
+          2.  Simple OLS regression (G&H's "Completely Pooled" approach) picks up the overall, negative slope:
+```{r , include=showR, echo=showR}
+summary(lm(y~x)) 
+```
+1. (cont.)
+    b. (cont.)
+        vi. Random intercept MLMs don't help us (much) in this instance: 
+```{r , include=showR, echo=showR}
+summary(lme(y~x,random=~1|id))
+```
+1. (cont.)
+    b. (cont.)
+        vi. (cont.)
+            1. Random effects MLMs actually estimate the single effect for 'x' as a *mixture* of between (completely pooled) and within (unpooled, mini-regressions, one for each group) group effects.  
+                + The mixing weights depend in part on the ICC. 
+                + The smaller ICC in this example may be part of the 'problem,' but it isn't that simple.
+                + Our simulation used 'effects' that were uniform - not normal – this could be a part of the problem as well.
+        vii. *Group-mean centering* will pick up the *within-group relationship*. 
+    c.  Some details about group-mean centering (CWC; center within cluster, Enders & Tofighi terminology)
+        i. Here, we build intuition for what group-mean centering is 'doing'
+        ii. When viewed separately for each group ID, the effect is clearly strong and positive:  
+        
+    ```{r , include=showR, echo=showR}
+    if (vanillaR) {
+       xyplot(y~x|id,type=c('p','r'))
+    } else {
+       df0 <-data.frame(x=x,y=y,id=id)
+       ggplot(data=df0,aes(y=y,x=x,colour=id))+geom_point()+scale_color_gradientn(colours = rainbow(K))+ facet_wrap(~id,ncol = 6) + geom_smooth(method = "lm", se = FALSE,col=1) + theme(legend.position="none")
+    }
+    ```  
+    c. (cont.)
+        iii. But when viewed in the aggregate, you can see it would be hard to model the within-group relationships separately from the between-group ones.  
+            1.  In fact, CWC allows one to model each relationship separately.  
+            2.  The plot, below, reveals the two distinct relationships  
+                + Actually the negative relationship (in grey, below) is slightly different from the effect based on the regression of *outcome-group-means* on *predictor-group-means*, but it is very nearly the same (and easier to include in the 'statistical programming').
+    ```{r , include=showR, echo=showR}
+    if (vanillaR) {
+      xyplot(y~x,group=id,type=c('p','r'),col=rainbow(K),panel=function(...){
+        panel.xyplot(...)
+        panel.abline(lsfit(x,y),col=8,lwd=4)})
+    } else {
+        ggplot(data=NULL,aes(y=y,x=x,colour=factor(id)))+ geom_point()+ geom_smooth(method = "lm", fill=NA) + theme(legend.position="none") + geom_smooth(data=NULL,method="lm",aes(y=y,x=x),colour="grey",size=2,se=F)
+    }
+ 
+    ```
+    c. (cont.)
+        iv. The exact relationship of the group means is about -0.1, as this group-level analysis, below, reveals:
+```{r , include=showR, echo=showR}
+#BASICALLY, we take the means by group and then run an OLS regression on them:
+mn.x <- tapply(x,id,mean)
+mn.y <- tapply(y,id,mean)
+summary(lm(mn.y~mn.x))
+```
+1. (cont.)
+    c. (cont.)
+        v. One notation for group-mean centering in the context of MLMs:
+            1.  Define the group mean as 
+$$
+            \bar{x}_j = \frac{1}{n_j}\sum\limits_i {x_{ij}} 
+$$
+where ${n_j}$ is the number of individuals in group *j*. Another expression could be ${\bar x_{ \bullet j}}$ when there is any ambiguity about which indices are being averaged over. 
+            2. Then CWC values for 'x' are defined by $x - {\bar x_j}$. This 'new' predictor *is entered in a model* in place of 'x'.
+       vi. We can fit the random intercept MLM for our simulated data using CWC values for 'x':
+```{r , include=showR, echo=showR}
+x.ctr <- x - mn.x[id]
+x.gp <- mn.x[id]
+summary(lme(y~x.ctr,random=~1|id))
+```
+1. (cont.)
+    c. (cont.)
+        vii. We have recovered the *within-group* relationship (the actual value is 1.0, but 0.97 is close enough, given sampling variation). 
+
+\newpage
+## Hybrid model
+
+2. A hybrid model:
+    a. Up until this point, we have focused on recovering the within-group relationships. It turns out that we can recover both within- and between-group predictor/outcome relationships, simply by including the group means back in the model.
+    b. So a random intercept model relating 'y' and 'x' with groups, as per our simulation, CWC looks like this:
+$$
+{y_{ij}} = {b_0} + {b_1}({x_{ij}} - {\bar x_j}) + {\eta_j} + {\varepsilon_{ij}}
+$$
+$$
+{\varepsilon_{ij}} \sim N(0,\sigma_\varepsilon ^2),\ {\eta_j} \sim N(0,\sigma_\eta^2),\mbox{ indep.}
+$$
+    c. The hybrid approach puts ${\bar x_j}$ back in the model:
+$$
+{y_{ij}} = {b_0} + {b_1}({x_{ij}} - {\bar x_j}) + {b_2}{\bar x_j} + {\eta_j} + {\varepsilon_{ij}}
+$$
+and the random terms are as before.
+    d. Note: ${\bar x_j}$ looks like it is in the model 'twice', but it does not cancel. There are *two effects* being identified.
+    e. Some practitioners like to assess 'contextual effects' after fitting models such as these. This is estimated from ${b_2} - {b_1}$.   
+        i. The contextual effect quantifies the amount of 'pure' group effect. That is, the relationship that goes beyond that which would be expected from the aggregation of individual effects, alone. See Bryk & Raudenbush (2002).
+    f. Here is the hybrid MLM model fit:
+```{r , include=showR, echo=showR}
+summary(fit<-lme(y~x.ctr+x.gp,random=~1|id))
+```
+2. (cont.)
+    f. (cont.)
+        1. We can recover both the between (-0.1) and within (+1.0) effects.
+        2. The random effects variance drops from $0.92^2$ to $0.41^2$, an 80% decrease. So group means are correlated with the group effects estimated in the first model.
+    d. The CWC of 'x' changes the group-specific plots (below) so that they have very similar ranges for ${x_{ij}} - {\bar x_j}$ (now centered on 0)  
+    ```{r , include=showR, echo=showR}
+    if (vanillaR) {
+      xyplot(y~x.ctr|id,type=c('p','r'))
+    } else {
+       df0 <-data.frame(x=x,y=y,x.ctr=x.ctr,id=id)
+       ggplot(data=df0,aes(y=y,x=x.ctr,colour=id))+geom_point()+scale_color_gradientn(colours = rainbow(K))+ facet_wrap(~id,ncol = 6) + geom_smooth(method = "lm", se = FALSE,col=1) + theme(legend.position="none") 
+    }
+    ```  
+    e. You can see that the upper left panel (group ID=1) starts higher and then this group level mean diminishes as we work our way towards the bottom right panel, which is group 30.
+        i. The shift of all of the predictors within group and the group outcome level differences are easier to see in the superimposed plot.
+    f. We follow this by the original data with the group means (in both x & y, superimposed), to see the contrasting emphasis.
+    
+    ```{r , include=showR, echo=showR}
+xyplot(y~x.ctr,group=id,type=c('p','r'),col=rainbow(K))
+plot(x,y,col=rainbow(K)[id])
+points(mn.x,mn.y,pch=16,col=rainbow(K),cex=2)
+    ```  
+   g. While the hybrid model is an MLM, the within-group relationships can be recovered using OLS regression (NOTE: s.e. will be wrong): 
+```{r , include=showR, echo=showR}
+summary(lm(y~x.ctr))
+```
+2. (cont.)
+    h. The between group relationship may be recovered with OLS as we have previously shown.  
+
+\newpage
+## Fixed vs. random effects
+3.  The classic econometric approach: take fixed effects
+    a.  The idea is to include indicator variables for the groups – like a random effects model, only there are no *distributional* assumptions on the ${\eta_j}$; in fact they are estimated from the data and can be listed like any other regression parameter. 
+    b.  The model is 
+$$
+{y_{ij}} = {b_0} + {b_1}{x_{ij}} + {\eta_j} + {\varepsilon_{ij}}
+$$
+$$
+{\varepsilon_{ij}} \sim N(0,\sigma_\varepsilon ^2)
+$$ 
+If you read Gelman & Hill's book, you might be comfortable with the idea that we could say ${\eta_j}\sim N(0,\infty)$.
+    c.  Another way to write, with indicators, is: 
+$$
+{y_{ij}} = {b_0} + {b_1}{x_{ij}} + \sum\limits_{j = 1}^J {{\eta_j}I\{ GROUP = j\} } + {\varepsilon_{ij}}
+$$
+where $I\{\cdots\}$ is an indicator variable.
+    d.  This is no longer a classical MLM – nothing is random other than error. 
+    e.  We fit this model using OLS regression:
+    ```{r , include=showR, echo=showR}
+fit.fe <- lm(y~factor(id)+x-1)
+summary(fit.fe)
+    ```
+    f.  Why does this yield the same estimates as the Hybrid model? It's not by adjusting 'x' but by implicitly by adjusting 'y' (or the level).
+        i.  But if one adjusts y, then the relationship between x and the adjusted y changes, right? Think of adjusted y as a residualized y.
+        ii. First, recall that there are differences in level between groups, but these are not large. *These adjustments are much larger because they accommodate the x effect as well.* This plot is the 'baseline' of the information we have about relationships:
+    ```{r , include=showR, echo=showR}
+      xyplot(y~x,group=id,type=c('p','r'),col=rainbow(K),panel=function(...) {
+      	panel.xyplot(...)
+      	panel.abline(lsfit(x,y),col=8,lwd=4)})	
+    ```
+    g. Let's adjust y so that the group level fixed effects ${\eta_j}$ have been removed. These are similar to residuals computed using only part of the prediction equation. So we construct ${y_{ij}} - {\eta_j}$ (ignoring x), followed by a plot of the relationships (and new level) by group:
+    ```{r , include=showR, echo=showR}
+y.adj <- y - fit.fe$coef[id] 
+    #both types of plots are informative:
+       xyplot(y.adj~x|id,type=c('p','r'))
+    #now ggplot
+       df0 <-data.frame(x=x,y=y,y.adj=y.adj,x.ctr=x.ctr,id=id)
+       ggplot(data=df0,aes(y=y.adj,x=x,colour=id))+geom_point()+scale_color_gradientn(colours = rainbow(K))+ facet_wrap(~id,ncol = 6) + geom_smooth(method = "lm", se = FALSE,col=1) + theme(legend.position="none")
+    ```
+    h.  Recall that the raw differences between group outcomes is reasonably small – most are in the range 30-34. 
+        i.  Above, the adjusted means are much further apart, in the range 0-30 (the fixed effect adjustments were in the range 2-33 and the constant was omitted). 
+        ii. Below, we superimpose the previous plots, revealing that the adjustments align each group so that they all fall on a common regression line:
+
+    ```{r , include=showR, echo=showR}
+    #both types of plots are informative:
+        xyplot(y.adj~x,group=id,type=c('p','r'),col=rainbow(K),panel=function(...) {
+	         panel.xyplot(...)
+	         panel.abline(lsfit(x,y.adj),col=8,lwd=4)})
+  #now ggplot
+       df0 <-data.frame(x=x,y=y,y.adj=y.adj,x.ctr=x.ctr,id=id)
+       ggplot(data=df0,aes(y=y.adj,x=x,colour=factor(id)))+geom_point()+ geom_smooth(method = "lm", se = FALSE) + theme(legend.position="none")
+    ```
+    i. So, the fixed effects model creates an adjustment so that the outcome level moves up or down to force the adjusted values to reveal ONLY the within-group relationship (or coincide with it, depending on your perspective). 
+        1.  Note that this is distinctly different than CWC, which shifts the '*x*' to create an alignment; fixed effects models *have the effect of shifting the 'y'.*
+        2.  We demonstrate this 'motion' in a 'live' animation in R:
+    ```{r , include=showR, echo=showR}
+y.it <- y
+y.feff.tot <- rep(0,K) #assume FE etas are zero
+liveDemo <- F
+for (i in 1:300) {
+  if (liveDemo) {      print(xyplot(y.it~x,group=id,type=c('p','r'),col=rainbow(K),panel=function(...) {
+	panel.xyplot(...)
+	panel.abline(lsfit(x,y.it),col=8,lwd=4)
+	}))
+  Sys.sleep(.06)
+  }
+  #fit model with only x
+  fit.x.only <- lm(y.it~x)
+  y.feff <- tapply(resid(fit.x.only),id,mean) #constr FE etas from mean resids 
+  y.feff.tot <- y.feff.tot + y.feff #cumulate using prior FE etas
+  y.it <- y - y.feff.tot[id] #residualize by cummulative FE etas effect (recall they began as 0)
+  if (i<=10 || i>290) cat(i,'beta.x=',round(coef(fit.x.only)[2],2),'sigma2.eta=',round(var(y.feff.tot),2),'\n')
+}
+    ```
+    j. This iterative process keeps taking the average of the residuals from a 'new' set of fixed effects for each group (the etas). Each time a new adjustment is made, this yields a new relationship with 'x' and a new set of residuals… Eventually, only very small adjustments are made close to iteration 300… 
+    k.  Why not always use fixed effects models?
+        i.  Inefficient? 
+            1.  If the random effects assumptions are tenable, the fixed effects approach is unnecessary – you would get the same result and use fewer degrees of freedom.
+        ii. Many group sizes are small (or singletons) 
+        iii. You care about variance components?
+        iv. You have group-constant predictors. (relates to var. comps.)  
+4. Illustrative example: hybrid model applied to classroom data, MATHKIND outcome and SES as predictor.
+    a. First the model with no centering: 
+$$
+MATHKIND_{ijk} = {b_0} + {b_1}SES_{ijk} + {\zeta_k} + {\varepsilon_{ijk}}
+$$
+with the usual distributional assumptions.
+        i. In R:
+    ```{r , include=showR, echo=showR}
+require(foreign)
+require(lme4)
+library(lmerTest)
+library(plm)#for hausman test
+library(aod)#for wald test
+#insheet using "classroom.csv", comma clear
+dat <- read.csv("../Datasets/classroom.csv")
+#*baseline model
+#xtmixed  mathkind ses  ||  schoolid: , var reml
+fit1 <- lmer(mathkind~ses+(1|schoolid),data=dat)
+print(summary(fit1))
+    ```
+    a. (cont.)
+        1. (cont.)
+            i. ${\hat b_1} = 10.7$; $\hat \sigma_\zeta ^2 = 309$; $\hat \sigma_\varepsilon ^2 = 1308$
+    b. Preliminary data adjustment: create the school-level means for SES:
+    ```{r , include=showR, echo=showR}
+#*group-mean centering - setup
+#egen mean_ses = mean(ses), by(schoolid)
+mn.ses <- tapply(dat$ses,dat$schoolid,mean)
+#gen rel_ses = ses-mean_ses
+idx <- match(dat$schoolid,sort(unique(dat$schoolid)))
+dat$mean_ses <- mn.ses[idx] #spreads the mean out in the right way, by idx (could use plyr library)
+dat$rel_ses <- dat$ses - dat$mean_ses
+    ```
+    c.  Now the model with group-mean centering: 
+$$
+MATHKIND_{ijk} = {b_0} + {b_{1W}}(SES_{ijk} - {\overline {SES}_k}) + {\zeta_k} + {\varepsilon_{ijk}}
+$$
+In R:
+    ```{r , include=showR, echo=showR}
+#xtmixed  mathkind rel_ses  ||  schoolid: , var reml
+fit1b <- lmer(mathkind~rel_ses+(1|schoolid),data=dat)
+print(summary(fit1b))
+    ```
+    c. (cont.)
+        2. ${\hat b_{1W}} = 9.7$; $\hat \sigma_\zeta ^2 = 368$; $\hat \sigma_\varepsilon ^2 = 1305$
+            a. Comment: slightly smaller effect for *relative* (within) SES. 
+            b. Larger between-school differences.  
+                +  Relative SES doesn't pick up as much of the school-level differences as we'd like. 
+                + It cannot, as the overall SES level for that school has been subtracted out.
+    d. Now the same model, with a group level predictor: 
+$$
+MATHKIND_{ijk} = {b_0} + {b_{1W}}(SES_{ijk} - {\overline {SES}_k}) + {b_{1B}}{\overline {SES}_k} + {\zeta_k} + {\varepsilon_{ijk}}
+$$
+
+    ```{r , include=showR, echo=showR}
+#*now include mean-level predictor
+#xtmixed  mathkind rel_ses mean_ses   ||  schoolid: , var reml
+fit2 <- lmer(mathkind~rel_ses+mean_ses+(1|schoolid),data=dat)
+print(summary(fit2))
+    ```
+    d. (cont.)
+        1. ${\hat b_{1W}} = 9.7$; ${\hat b_{1B}} = 22.3$; $\hat\sigma_\zeta^2 = 285$; $\hat\sigma_\varepsilon^2 = 1310$
+            i. Returns to *relative* (within) SES are the same
+            ii. The group (between), or mean SES effect is much larger. 
+            iii. Test significance (of difference) using a Wald test:
+    ```{r , include=showR, echo=showR}
+#test rel_ses-mean_ses=0
+print(wald.test(b = fixef(fit2), Sigma=summary(fit2)$vcov, L=matrix(c(0,1,-1),1,3)))
+    ```
+   d. (cont.)
+       1. (cont.)
+           iv. The larger group-SES effect helps to explain why the uncentered SES effect is a bit larger: in random effects MLMs without centering, the coefficient is a mixture of the relative (${\hat b_{1W}} = 9.7$) and group (${\hat b_{1B}} = 22.3$) effects.
+           v. Note that the group means and relative SES are orthogonal, by construction, so the inclusion of one does not affect the estimate of the other.  
+5. The choice between fixed and random: classical exposition (see MLM Handbook Chapter 5)
+    a.  NOTE: we are returning to a model of the form: 
+$$
+{y_{ij}} = {b_0} + {b_1}{x_{ij}}_j + {\eta_j} + {\varepsilon_{ij}}
+$$
+$$
+{\varepsilon_{ij}} \sim N(0,\sigma_\varepsilon^2)
+$$ 
+and the assumptions surrounding ${\eta_j}$ are left to be specified.
+    b.  We are given two models: one is unbiased but inefficient; the other will be biased if its assumptions are violated, but otherwise it is more efficient. *Which one should we choose?*
+        i.  The fixed effects estimator is unbiased (under a limited set of assumptions, and allowing ${\eta_j}$ to vary without normality assumptions).
+        ii. The random effects estimator is efficient, and unbiased (under stronger assumptions, including that ${\eta_j}$ and ${\varepsilon_{ij}}$ are uncorrelated) 
+    c.  The approach commonly used is to fit the two competing models, compare the regression coefficients, and if there is a significant, joint difference, then you have evidence that you need to use the unbiased estimator.
+    d.  Use more efficient model if no difference is detected.
+    e.  Drawbacks to using the fixed effects estimator:
+        i.  No group-constant predictors allowed
+        ii. Inefficient (even non-identifiable) – this might matter in a practical way if you don't have enough data or replications at the group level.
+    f.  Hausman test. There are other approaches to testing fixed vs. random effects, but the Hausman test is the classical one:
+        i.  Recall that the key distinction between fixed (FE) vs. random effects (RE) models is the assumption in RE that ${\eta_j}$ and ${\varepsilon_{ij}}$ are uncorrelated (returning here to the original model ). Hausman (1978) proposes a specification test of this assumption.
+            1.  Since FE is consistent even when ${\eta_j}$ and ${\varepsilon_{ij}}$ are correlated but RE is only consistent (and more efficient) under the null of no correlation, the logic of the test is to compare the results from the two models.
+            2.  Test statistic is 
+$$
+H = ({\hat \beta_{FE}} - {\hat \beta_{RE}})'{({\hat V_{FE}} - {\hat V_{RE}})^{ - 1}}({\hat \beta_{FE}} - {\hat \beta_{RE}})
+$$
+where ${\hat \beta_{FE}},{\hat \beta_{RE}}$ are the regression coefficient estimates from the FE and RE models, respectively, and ${\hat V_{FE}},{\hat V_{RE}}$ are estimates of the variance-covariance matrices associated with those coefficients.  
+                + This is a Wald-like test relying on the material from Handout 4 (sampling variation of parameter estimates).
+            3.  Under the null, $H\sim{\chi ^2}(\nu )$, where the d.f. $(\nu )$ is the number of coefficients in both models (excluding the constant).
+    g. Worked example using the Hausman test. (NOTE: STATA and R give slightly different results)
+        i.  Fit the FE model first:
+    ```{r , include=showR, echo=showR}
+    #slightly different results in R as compared to STATA.
+fit.re <- plm(mathkind ~ ses,index="schoolid", data = dat, model = "random")
+    ```
+    g. (cont.)
+        ii. Fit the RE model next:
+    ```{r  , include=showR, echo=showR}
+fit.fe <- plm(mathkind ~ ses,index="schoolid", data = dat, model = "within")
+    ```
+    g. (cont.)
+        ii. (cont.)
+            1.  Note – the FE and RE coefficients for SES are *not* the *between* groups coefficients recovered in the hybrid model. They are attempts to estimate the *within*-group effect. 
+            2.  Both the RE & FE models are attempting to 'control' for group level differences.
+            3.  The difference in the coefficients for the two models is about 1 point, which is about 10% of the effect's size.
+        iii. Here is the test statistic *H*:
+    ```{r , include=showR, echo=showR}
+print(phtest(fit.fe,fit.re))
+    ```
+    g. (cont.)
+        iii. (cont.)  
+            1.  This p-value suggests that we should use FE models (if we only have one predictor, SES, etc.)!  
+            2.  The difference didn't look that large, but it was measured precisely enough that we reject the null, and should consider using FE models.   
+                + We might 'need' to include group-constant predictors, and this would preclude FE models, e.g.
+    h. For more details, particularly comparisons of between and within effects common to the econometric approaches to estimation, see Allison's hybrid model discussion (2005; *Fixed Effects Regression Methods for Longitudinal Data Using SAS*, pp. 32-38) and Enders and Tofighi (2007), both on Brightspace.
